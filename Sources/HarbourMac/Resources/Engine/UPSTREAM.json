@@ -1,0 +1,6 @@
+{
+  "repository": "https://github.com/tw93/Mole",
+  "commit": "2ab192fb59674d12f95b95d46a13b956c50e8b1a",
+  "version": "1.53.0",
+  "modifications": "GUI selection and confirmation hooks; see scripts/prepare_engine.py"
+}

@@ -1,0 +1,8 @@
+.build/
+dist/
+.DS_Store
+Harbour-build.*
+*.dmg
+*.app
+__pycache__/
+*.py[cod]

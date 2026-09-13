@@ -1,0 +1,28 @@
+name: Build Intel DMG
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: macos-15-intel
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: Sources/HarbourMac/Resources/Engine/go.mod
+          cache-dependency-path: Sources/HarbourMac/Resources/Engine/go.sum
+      - name: Native core tests and full Swift compilation
+        run: swift test
+      - name: IPC, cancellation and shell syntax tests
+        run: python3 Tests/test_transport.py
+      - name: Build x86_64 app and DMG
+        run: bash scripts/build.command
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Harbour-Intel
+          path: dist/Harbour-Intel.dmg
