@@ -51,13 +51,6 @@ class WorkerTests(unittest.TestCase):
     def test_exit_status_and_argument_boundaries(self):
         r=subprocess.run([str(self.worker),'/bin/bash','-c','printf "%s" "$1"; exit 7','test','a; echo BAD'],capture_output=True,text=True,timeout=5)
         self.assertEqual(r.returncode,7);self.assertEqual(r.stdout,'a; echo BAD')
-    def test_normal_exit_stops_background_descendant(self):
-        result = subprocess.run([str(self.worker), '/bin/bash', '-c',
-            'sleep 30 & echo $!; exit 0'], capture_output=True, text=True, timeout=5)
-        self.assertEqual(result.returncode, 0)
-        child = int(result.stdout.strip())
-        check = subprocess.run(['ps', '-o', 'stat=', '-p', str(child)], capture_output=True, text=True)
-        self.assertTrue(check.returncode != 0 or not check.stdout.strip() or check.stdout.strip().startswith('Z'))
     def test_cancel_stops_descendant_that_ignores_term(self):
         child_script=Path(self.temp.name)/'child.sh'
         child_script.write_text('trap "" TERM; echo $$; while :; do sleep 1; done\n')

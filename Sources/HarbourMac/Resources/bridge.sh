@@ -13,7 +13,6 @@ export PATH="/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 export TERM=dumb
 export SUDO_ASKPASS="$BASE/askpass.sh"
 source "$BASE/protocol.sh"
-[[ "${HARBOUR_DEBUG:-0}" != 1 ]] || export MO_DEBUG=1
 command_name="${1:-}"
 shift || true
 mode="${1:-preview}"
@@ -50,8 +49,7 @@ case "$command_name" in
         ;;
     uninstall)
         source "$ENGINE/bin/uninstall.sh"; setup_auth
-        [[ $# -eq 1 && ( "$1" == trash || "$1" == permanent ) ]] || exit 2
-        export MOLE_CURRENT_COMMAND=uninstall MOLE_DELETE_MODE="$1"
+        export MOLE_CURRENT_COMMAND=uninstall MOLE_DELETE_MODE=trash
         log_operation_session_start uninstall
         inventory="$(scan_applications)" || exit 1
         load_applications "$inventory" || exit 1
@@ -83,16 +81,12 @@ case "$command_name" in
         ;;
     purge)
         source "$ENGINE/bin/purge.sh"; setup_auth
-        [[ "${HARBOUR_INCLUDE_EMPTY:-0}" != 1 ]] || export MOLE_PURGE_INCLUDE_EMPTY=1
         if [[ "$mode" == preview ]]; then main --dry-run; else main; fi
         ;;
     touchid)
         [[ $# -eq 1 && ( "$1" == enable || "$1" == disable || "$1" == status ) ]] || exit 2
         source "$ENGINE/bin/touchid.sh"; setup_auth
-        if [[ "$mode" == apply && "$1" != status ]]; then
-            harbour_confirm '修改 Touch ID sudo 設定；只適用配備 Touch ID 的 Mac' || exit 130
-            ensure_sudo_session || exit 1
-        fi
+        if [[ "$mode" == apply && "$1" != status ]]; then harbour_confirm '修改 Touch ID sudo 設定；只適用配備 Touch ID 的 Mac' || exit 130; fi
         main "$1"
         ;;
     remove)
@@ -108,15 +102,6 @@ case "$command_name" in
             load_whitelist "$kind"
             text="$(printf '%s\n' "${CURRENT_WHITELIST_PATTERNS[@]+"${CURRENT_WHITELIST_PATTERNS[@]}"}")"
             harbour_event config "$text"
-            if [[ "$kind" == clean ]]; then
-                while IFS='|' read -r label pattern category; do
-                    harbour_event option "$label" "$pattern"
-                done < <(get_all_cache_items)
-            else
-                while IFS='|' read -r label pattern category; do
-                    harbour_event option "$label" "$pattern"
-                done < <(get_optimize_whitelist_items)
-            fi
         else
             save_whitelist_patterns "$kind" "$@"
             echo '白名單已儲存。'
@@ -142,8 +127,8 @@ case "$command_name" in
         ids=()
         for path in "$@"; do
             validate_path_for_deletion "$path" || exit 1
-            identity="$(run_with_timeout "$MOLE_TIMEOUT_QUICK_DETECT_SEC" "$STAT_BSD" -f%d:%i:%m "$path")" || exit 1
-            [[ "$identity" =~ ^[0-9]+:[0-9]+:[0-9]+$ ]] || exit 1
+            identity="$(mole_path_identity "$path")"
+            [[ -n "$identity" ]] || exit 1
             ids+=("$identity")
             printf '%s\n' "$path"
         done

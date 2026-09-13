@@ -35,10 +35,4 @@ new='''    if declare -F harbour_confirm >/dev/null; then
 replace('lib/uninstall/batch.sh',old,new)
 replace('bin/installer.sh','    IFS= read -r -s -n1 confirm || confirm=""','    if declare -F harbour_confirm >/dev/null; then\n        harbour_confirm "永久刪除以上安裝檔" || return 1\n        confirm=""\n    else\n        IFS= read -r -s -n1 confirm || return 1\n    fi')
 replace('lib/manage/remove.sh','    IFS= read -r -s -n1 key || key=""','    if declare -F harbour_confirm >/dev/null; then\n        harbour_confirm "移除電腦上 Mole CLI、設定及紀錄；Harbour 本身會保留" || return 1\n        key=""\n    else\n        IFS= read -r -s -n1 key || return 1\n    fi')
-replace('bin/touchid.sh', '        read -rp "Continue anyway? [y/N] " confirm', '''        if declare -F harbour_confirm >/dev/null; then
-            harbour_confirm "此 Mac 可能沒有 Touch ID；仍要修改 sudo 認證設定？" || return 1
-            confirm=y
-        else
-            read -rp "Continue anyway? [y/N] " confirm
-        fi''')
 print(sha)

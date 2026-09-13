@@ -30,11 +30,6 @@ struct Candidate: Identifiable {
     let path: String
     let detail: String
 }
-struct ProtectionOption: Identifiable {
-    var id: String { pattern }
-    let title: String
-    let pattern: String
-}
 struct DiskEntry: Decodable, Identifiable {
     var id: String { path }
     let name: String
@@ -72,13 +67,9 @@ struct DiskReport: Decodable {
     @Published var diskSelection: Set<String> = []
     @Published var externalPath = ""
     @Published var admin = false
-    @Published var uninstallPermanent = false
-    @Published var includeEmpty = false
-    @Published var debug = false
     @Published var configKind = "clean"
     @Published var configText = ""
     @Published var configLoaded = false
-    @Published var configOptions: [ProtectionOption] = []
     @Published var cliPath = UserDefaults.standard.string(forKey: "molePath") ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/bin/mo").path
     @Published var watch = false
     @Published var versionInfo = "內置引擎：Mole 1.53.0（固定版本）"
@@ -109,10 +100,6 @@ struct DiskReport: Decodable {
         case "select": selecting = true
         case "confirm": selecting = false; confirm = event.fields[0]
         case "config": configText = event.fields[0]; configLoaded = true
-        case "option":
-            if !configOptions.contains(where: { $0.pattern == event.fields[1] }) {
-                configOptions.append(ProtectionOption(title: event.fields[0], pattern: event.fields[1]))
-            }
         default: break
         }
     }
@@ -128,7 +115,7 @@ struct DiskReport: Decodable {
     func bridge(_ command: String, apply: Bool, args: [String] = [], completion: ((Data, Int32) -> Void)? = nil) {
         guard !runner.busy else { return }
         resetSession()
-        runner.start(URL(fileURLWithPath: "/bin/bash"), [runner.resourceURL.appendingPathComponent("bridge.sh").path, command, apply ? "apply" : "preview"] + args, environment: ["HARBOUR_ADMIN": admin ? "1" : "0", "HARBOUR_INCLUDE_EMPTY": includeEmpty ? "1" : "0", "HARBOUR_DEBUG": debug ? "1" : "0"]) { [weak self] data, rc in
+        runner.start(URL(fileURLWithPath: "/bin/bash"), [runner.resourceURL.appendingPathComponent("bridge.sh").path, command, apply ? "apply" : "preview"] + args, environment: ["HARBOUR_ADMIN": admin ? "1" : "0"]) { [weak self] data, rc in
             self?.selecting = false; self?.confirm = nil
             completion?(data, rc)
         }
@@ -139,8 +126,7 @@ struct DiskReport: Decodable {
         if page == .external && externalPath.isEmpty { notice = "請先選擇外置磁碟。"; return }
         let key = previewKey
         previews[key] = nil
-        let args = page == .external ? [externalPath] : (page == .uninstall ? [uninstallPermanent ? "permanent" : "trash"] : [])
-        bridge(page.command, apply: apply, args: args) { [weak self] _, rc in
+        bridge(page.command, apply: apply, args: page == .external ? [externalPath] : []) { [weak self] _, rc in
             if !apply && rc == 0 { self?.previews[key] = Date() }
         }
     }
@@ -198,22 +184,7 @@ struct DiskReport: Decodable {
     }
     func loadConfig() {
         configLoaded = false
-        configOptions = []
         bridge(configKind == "purgepaths" ? "purgepaths" : "whitelist", apply: false, args: configKind == "purgepaths" ? [] : [configKind])
-    }
-    func hasProtection(_ pattern: String) -> Bool {
-        configText.components(separatedBy: .newlines).contains { normalizedPattern($0) == normalizedPattern(pattern) }
-    }
-    private func normalizedPattern(_ pattern: String) -> String {
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        if pattern.hasPrefix("$HOME/") { return home + String(pattern.dropFirst(5)) }
-        if pattern.hasPrefix("~/") { return home + String(pattern.dropFirst()) }
-        return pattern
-    }
-    func setProtection(_ pattern: String, enabled: Bool) {
-        var lines = configText.components(separatedBy: .newlines).filter { normalizedPattern($0) != normalizedPattern(pattern) && !$0.isEmpty }
-        if enabled { lines.append(pattern) }
-        configText = lines.joined(separator: "\n") + "\n"
     }
     func saveConfig() {
         guard configLoaded else { return }
@@ -316,8 +287,6 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 12) {
             Text(model.page?.subtitle ?? "").foregroundColor(.secondary)
             if model.page == .clean { Toggle("包括需要管理員權限的系統項目", isOn: $model.admin).disabled(model.runner.busy) }
-            if model.page == .uninstall { Toggle("永久刪除（不經垃圾桶）", isOn: $model.uninstallPermanent).disabled(model.runner.busy) }
-            if model.page == .purge { Toggle("顯示空白開發資料夾", isOn: $model.includeEmpty).disabled(model.runner.busy) }
             if model.page == .external {
                 HStack { Text(model.externalPath.isEmpty ? "未選擇磁碟" : model.externalPath).lineLimit(1); Button("選擇磁碟…") { model.chooseFolder(external: true) }.disabled(model.runner.busy) }
             }
@@ -349,16 +318,7 @@ struct ContentView: View {
             Picker("清單", selection: $model.configKind) { Text("清理白名單").tag("clean"); Text("維護白名單").tag("optimize"); Text("專案掃描路徑").tag("purgepaths") }.pickerStyle(SegmentedPickerStyle()).disabled(model.runner.busy)
             Text("一行一個路徑、模式或維護 task ID。白名單代表保留／略過；# 開頭為註解。先載入現有清單再修改。").foregroundColor(.secondary)
             HStack { Button("載入", action: model.loadConfig); Button("加入路徑…", action: model.addConfigPath).disabled(!model.configLoaded); Spacer(); Button("儲存", action: model.saveConfig).disabled(!model.configLoaded) }.disabled(model.runner.busy)
-            if !model.configOptions.isEmpty {
-                List(model.configOptions) { option in
-                    Toggle(isOn: Binding(get: { model.hasProtection(option.pattern) }, set: { model.setProtection(option.pattern, enabled: $0) })) {
-                        VStack(alignment: .leading) { Text(option.title); Text(option.pattern).font(.caption).foregroundColor(.secondary) }
-                    }.toggleStyle(CheckboxToggleStyle())
-                }.frame(minHeight: 180).disabled(model.runner.busy)
-            }
-            DisclosureGroup("自訂路徑及完整清單") {
-                TextEditor(text: $model.configText).font(.system(.body, design: .monospaced)).frame(minHeight: 120).disabled(!model.configLoaded || model.runner.busy)
-            }
+            TextEditor(text: $model.configText).font(.system(.body, design: .monospaced)).frame(minHeight: 240).disabled(!model.configLoaded || model.runner.busy)
             Link("Mole 白名單與維護說明", destination: URL(string: "https://github.com/tw93/Mole#quick-start")!)
         }
     }
@@ -366,7 +326,6 @@ struct ContentView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 Picker("外觀", selection: $appearance) { Text("跟隨系統").tag("system"); Text("淺色").tag("light"); Text("深色").tag("dark") }
-                Toggle("詳細偵錯紀錄", isOn: $model.debug)
                 GroupBox("引擎與版本") {
                     VStack(alignment: .leading, spacing: 8) {
                         Text(model.versionInfo)

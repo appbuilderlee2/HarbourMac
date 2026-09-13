@@ -103,12 +103,7 @@ enable_touchid() {
     # First check if system supports Touch ID
     if ! supports_touchid; then
         log_warning "This Mac may not support Touch ID"
-        if declare -F harbour_confirm >/dev/null; then
-            harbour_confirm "此 Mac 可能沒有 Touch ID；仍要修改 sudo 認證設定？" || return 1
-            confirm=y
-        else
-            read -rp "Continue anyway? [y/N] " confirm
-        fi
+        read -rp "Continue anyway? [y/N] " confirm
         if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
             echo -e "${YELLOW}Cancelled${NC}"
             return 1
