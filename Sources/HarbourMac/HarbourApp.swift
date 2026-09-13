@@ -54,6 +54,7 @@ struct DiskReport: Decodable {
     @Published var selecting = false
     @Published var selectionTitle = ""
     @Published var selectionNote = ""
+    @Published var selectionSubmitted = false
     @Published var confirm: String?
     @Published var query = ""
     @Published var notice = ""
@@ -81,42 +82,145 @@ struct DiskReport: Decodable {
         runner.onEvent = { [weak self] event in self?.handle(event) }
     }
     var previewKey: String { (page?.command ?? "") + "|" + externalPath + "|" + String(admin) }
+    var isSelectionOperation: Bool {
+        guard let page = page else { return false }
+        return [Page.uninstall, .purge, .installer].contains(page)
+    }
+    var actionTitle: String {
+        guard let page = page else { return "操作" }
+        switch page {
+        case .uninstall: return "掃描已安裝 App"
+        case .purge: return "掃描開發檔案"
+        case .installer: return "搜尋安裝檔"
+        case .clean: return "分析可清理項目"
+        case .optimize: return "檢查系統維護項目"
+        case .external: return "掃描外置磁碟"
+        case .disk: return "分析磁碟"
+        case .status: return "讀取系統狀態"
+        default: return "執行操作"
+        }
+    }
+    var actionInstructions: String {
+        guard let page = page else { return "" }
+        switch page {
+        case .uninstall: return "先掃描，完成後勾選你確定不要的 App；下一步會先顯示相關檔案，最後才會要求確認。"
+        case .purge: return "只會列出可重新產生的開發檔案。近期使用或雲端同步項目預設保留。"
+        case .installer: return "找出下載資料夾內的安裝檔。勾選後會永久刪除選取的檔案。"
+        case .clean: return "先按「預覽清理」了解會處理什麼；預覽不會刪除資料。"
+        case .optimize: return "先檢查系統維護項目，再由你決定是否執行。"
+        case .external: return "先選擇外置磁碟，再預覽 Mole 支援的暫存資料。"
+        default: return ""
+        }
+    }
+    var progressMessage: String {
+        if isSelectionOperation {
+            if selecting { return "掃描完成；你可以慢慢勾選，尚未刪除任何內容。" }
+            if confirm != nil { return "請先閱讀最後確認；按下確認執行前，不會刪除任何內容。" }
+            if selectionSubmitted { return "已送出選擇，正在核對精確路徑及相關檔案。" }
+            if runner.elapsedSeconds >= 30 {
+                return "掃描仍在進行；首次掃描會逐一核對 App 及相關檔案。未按最後確認前，不會刪除任何內容。"
+            }
+            return "目前只是在掃描，尚未刪除任何 App 或檔案。"
+        }
+        if !runner.taskTitle.hasPrefix("執行") && (runner.taskTitle.contains("預覽") || runner.taskTitle.contains("分析") || runner.taskTitle.contains("檢查")) { return "這一步只讀取及分析資料，不會刪除檔案。" }
+        if let currentPage = page, [.status, .disk, .history].contains(currentPage) { return "這一步只讀取資料，不會修改或刪除檔案。" }
+        return "操作進行中；完成前請不要重覆按其他操作。你可以按「停止」取消。"
+    }
+    var elapsedText: String {
+        let seconds = runner.elapsedSeconds
+        if seconds < 60 { return "已用 \(seconds) 秒" }
+        return String(format: "已用 %d 分 %02d 秒", seconds / 60, seconds % 60)
+    }
+    var resultGuide: String {
+        if runner.outcome.contains("取消") || runner.outcome.contains("停止") { return "操作已停止；已完成的項目不會自動復原。你可以重新掃描，確認目前狀態。" }
+        if runner.outcome.contains("結束") {
+            if isSelectionOperation && !selectionSubmitted {
+                return "掃描完成。請查看上方清單，勾選需要處理的項目，再按下一步核對。"
+            }
+            return isSelectionOperation ? "處理完成。你可以重新掃描，確認 App 或檔案目前的狀態。" : "檢查完成。你可以查看詳細結果，或按預覽／執行按鈕進行下一步。"
+        }
+        if runner.outcome == "尚未執行" { return "" }
+        return "操作未完整完成。請展開下方「詳細結果」查看原因，修正後再試。"
+    }
+    var confirmationTitle: String {
+        if isSelectionOperation { return "準備處理你選擇的項目" }
+        switch page {
+        case .clean: return "準備執行清理"
+        case .optimize: return "準備執行系統維護"
+        case .external: return "準備清理外置磁碟"
+        default: return "最後確認"
+        }
+    }
+    var confirmationMessage: String {
+        if isSelectionOperation {
+            return "你已選擇 \(selected.count) 項。確認後 Harbour 才會開始處理；你仍可返回修改清單。"
+        }
+        switch page {
+        case .clean: return "確認後會按預覽結果清理快取、日誌及暫存資料；部分內容可能永久刪除。"
+        case .optimize: return "確認後會執行已檢查的系統維護項目，可能重新整理 Finder、DNS 或系統服務。"
+        case .external: return "確認後只會處理你選擇的外置磁碟上的支援項目。"
+        default: return "請確認你明白這項操作可能改變本機資料。"
+        }
+    }
     var canApply: Bool {
         if let page = page, [Page.uninstall, .purge, .installer].contains(page) { return true }
         guard let stamp = previews[previewKey] else { return false }
         return Date().timeIntervalSince(stamp) < 600
     }
+    var previewStatus: String? {
+        guard !isSelectionOperation, let stamp = previews[previewKey] else { return nil }
+        let remaining = max(0, 600 - Int(Date().timeIntervalSince(stamp)))
+        return remaining > 0 ? "預覽已完成；你可在 \(max(1, remaining / 60)) 分鐘內執行" : nil
+    }
     var visibleRows: [Candidate] { rows.filter { query.isEmpty || ($0.name + $0.path + $0.detail).localizedCaseInsensitiveContains(query) } }
+    func friendlyDetail(_ detail: String) -> String {
+        var value = detail
+            .replacingOccurrences(of: "cloud:true", with: "雲端同步")
+            .replacingOccurrences(of: "cloud:false", with: "非雲端同步")
+            .replacingOccurrences(of: " bytes", with: " bytes")
+        if let first = value.components(separatedBy: " · ").first, !first.isEmpty {
+            value = "資料大小：\(first)" + (value == first ? "" : " · " + value.components(separatedBy: " · ").dropFirst().joined(separator: " · "))
+        }
+        return value
+    }
     func resetSession() {
-        rows = []; selected = []; selecting = false; confirm = nil; query = ""; notice = ""; runner.onLine = nil
+        rows = []; selected = []; selecting = false; selectionSubmitted = false; confirm = nil; query = ""; notice = ""; runner.onLine = nil
     }
     func handle(_ event: BridgeEvent) {
         switch event.kind {
-        case "begin": rows = []; selected = []; selectionTitle = event.fields[0]; selectionNote = event.fields[1]
+        case "begin":
+            rows = []; selected = []; selectionTitle = event.fields[0]; selectionNote = event.fields[1]
+            runner.taskPhase = "正在整理掃描結果…"
         case "row":
             guard let id = Int(event.fields[0]), id >= 0, !rows.contains(where: { $0.id == id }) else { runner.stop(); return }
             rows.append(Candidate(id: id, name: event.fields[1], path: event.fields[2], detail: event.fields[3]))
             if event.fields[4] == "true" { selected.insert(id) }
-        case "select": selecting = true
-        case "confirm": selecting = false; confirm = event.fields[0]
+            runner.taskPhase = "已找到 \(rows.count) 個項目"
+        case "select": selecting = true; runner.taskPhase = "請勾選你想處理的項目"
+        case "confirm": selecting = false; confirm = event.fields[0]; runner.taskPhase = "等待你最後確認"
         case "config": configText = event.fields[0]; configLoaded = true
         default: break
         }
     }
     func submitSelection() {
         guard let response = TextFormat.selection(selected, available: Set(rows.map(\.id))) else { return }
-        selecting = false; runner.send(response)
+        selectionSubmitted = true; selecting = false; runner.taskPhase = "正在核對你選擇的項目…"; runner.send(response)
     }
     func confirmAction(_ yes: Bool) {
         confirm = nil; runner.send(yes ? "CONFIRM\n" : "CANCEL\n")
-        if !yes { notice = "你已取消此操作。" }
+        if yes { runner.taskPhase = "正在執行…" } else { notice = "你已取消此操作。"; runner.taskPhase = "已取消" }
     }
-    func cancel() { selecting = false; confirm = nil; watch = false; runner.stop() }
-    func bridge(_ command: String, apply: Bool, args: [String] = [], completion: ((Data, Int32) -> Void)? = nil) {
+    func cancel() { selecting = false; confirm = nil; watch = false; runner.taskPhase = "正在停止…"; runner.stop() }
+    func bridge(_ command: String, apply: Bool, args: [String] = [], title: String? = nil, phase: String? = nil, completion: ((Data, Int32) -> Void)? = nil) {
         guard !runner.busy else { return }
         resetSession()
+        runner.taskTitle = title ?? (apply && !isSelectionOperation ? "執行\(actionTitle)" : actionTitle)
+        runner.taskPhase = phase ?? (apply && !isSelectionOperation ? "正在準備執行…" : "正在掃描，請稍候…")
         runner.start(URL(fileURLWithPath: "/bin/bash"), [runner.resourceURL.appendingPathComponent("bridge.sh").path, command, apply ? "apply" : "preview"] + args, environment: ["HARBOUR_ADMIN": admin ? "1" : "0"]) { [weak self] data, rc in
             self?.selecting = false; self?.confirm = nil
+            if rc == 0 { self?.runner.taskPhase = apply ? "完成" : "預覽完成" }
+            else if rc == 130 { self?.runner.taskPhase = "已取消" }
+            else { self?.runner.taskPhase = "需要查看詳細結果" }
             completion?(data, rc)
         }
     }
@@ -140,6 +244,7 @@ struct DiskReport: Decodable {
         guard !runner.busy else { return }
         if let path = path { folder = path }
         resetSession(); disk = nil; diskSelection = []
+        runner.taskTitle = "分析磁碟"; runner.taskPhase = "正在讀取資料夾及檔案大小…"
         runner.start(runner.engineURL.appendingPathComponent("bin/analyze-go"), ["--json", folder], timeout: 1800) { [weak self] data, rc in
             guard rc == 0 else { return }
             do { self?.disk = try JSONDecoder().decode(DiskReport.self, from: data) }
@@ -161,6 +266,7 @@ struct DiskReport: Decodable {
     func loadStatus(live: Bool) {
         guard !runner.busy else { return }
         resetSession(); watch = live
+        runner.taskTitle = live ? "持續監察系統" : "讀取系統狀態"; runner.taskPhase = live ? "每 2 秒更新一次；按停止結束監察" : "正在讀取 CPU、記憶體及硬件資料…"
         if live {
             runner.onLine = { [weak self] line in
                 guard let data = line.data(using: .utf8), let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
@@ -177,6 +283,7 @@ struct DiskReport: Decodable {
     }
     func loadHistory() {
         guard !runner.busy else { return }; resetSession()
+        runner.taskTitle = "載入操作紀錄"; runner.taskPhase = "正在讀取本機紀錄…"
         runner.start(URL(fileURLWithPath: "/bin/bash"), [runner.engineURL.appendingPathComponent("mole").path, "history", "--json"]) { [weak self] data, rc in
             guard rc == 0, let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
             self?.history = value
@@ -184,13 +291,13 @@ struct DiskReport: Decodable {
     }
     func loadConfig() {
         configLoaded = false
-        bridge(configKind == "purgepaths" ? "purgepaths" : "whitelist", apply: false, args: configKind == "purgepaths" ? [] : [configKind])
+        bridge(configKind == "purgepaths" ? "purgepaths" : "whitelist", apply: false, args: configKind == "purgepaths" ? [] : [configKind], title: "載入保護設定", phase: "正在讀取本機設定…")
     }
     func saveConfig() {
         guard configLoaded else { return }
         let lines = configText.components(separatedBy: .newlines).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty && !$0.hasPrefix("#") }
         let prefix = configKind == "purgepaths" ? [] : [configKind]
-        bridge(configKind == "purgepaths" ? "purgepaths" : "whitelist", apply: true, args: prefix + lines) { [weak self] _, rc in
+        bridge(configKind == "purgepaths" ? "purgepaths" : "whitelist", apply: true, args: prefix + lines, title: "儲存保護設定", phase: "正在寫入本機設定…") { [weak self] _, rc in
             if rc == 0 { self?.previews = [:]; self?.notice = "已儲存；之前的清理預覽已失效。" }
         }
     }
@@ -204,6 +311,7 @@ struct DiskReport: Decodable {
     }
     func cliVersion() {
         guard !runner.busy else { return }; resetSession()
+        runner.taskTitle = "偵測 Mole CLI 版本"; runner.taskPhase = "正在執行版本檢查…"
         runner.start(URL(fileURLWithPath: cliPath), ["--version"])
     }
     func updateCLI() {
@@ -211,7 +319,7 @@ struct DiskReport: Decodable {
         alert.informativeText = "更新 \(cliPath)。Harbour 的內置相容引擎保持 1.53.0；需要新版 Harbour 才會更新。"
         alert.addButton(withTitle: "更新"); alert.addButton(withTitle: "取消")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
-        resetSession(); runner.start(URL(fileURLWithPath: cliPath), ["update"])
+        resetSession(); runner.taskTitle = "更新 Mole CLI"; runner.taskPhase = "正在下載及安裝更新…"; runner.start(URL(fileURLWithPath: cliPath), ["update"])
     }
     func checkLatest() {
         guard !busyNetwork else { return }; busyNetwork = true
@@ -239,78 +347,150 @@ struct DiskReport: Decodable {
 struct ContentView: View {
     @ObservedObject var model: AppModel
     @AppStorage("appearance") private var appearance = "system"
-    @State private var logExpanded = true
+    @State private var logExpanded = false
     var body: some View {
         NavigationView {
             List(Page.allCases, selection: $model.page) { page in Label(page.rawValue, systemImage: page.icon).tag(page) }
                 .listStyle(SidebarListStyle()).frame(minWidth: 175, idealWidth: 190).disabled(model.runner.busy)
-            VStack(alignment: .leading, spacing: 14) {
-                HStack {
-                    VStack(alignment: .leading, spacing: 3) { Text(model.page?.rawValue ?? "Harbour").font(.largeTitle.bold()); Text("Harbour 0.3.0").font(.caption).foregroundColor(.secondary) }
-                    Spacer()
-                    if model.runner.busy { ProgressView().controlSize(.small); Button("停止", action: model.cancel) }
-                }
-                if !(model.page?.command.isEmpty ?? true) { operationView }
-                else {
-                    switch model.page {
-                    case .status: DashboardView(model: model)
-                    case .disk: DiskView(model: model)
-                    case .history: HistoryView(model: model)
-                    case .protection: protectionView
-                    case .settings: settingsView
-                    default: EmptyView()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack(alignment: .top) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(model.page?.rawValue ?? "Harbour").font(.largeTitle.bold())
+                            Text(headerSubtitle).font(.caption).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
+                            Text("Harbour 0.3.1 · Intel / macOS 12+").font(.caption2).foregroundColor(.secondary)
+                        }
+                        Spacer()
+                        if model.runner.busy {
+                            HStack(spacing: 8) { ProgressView().controlSize(.small); Button("停止", action: model.cancel) }
+                        }
                     }
-                }
-                if model.selecting { selectionView }
-                if let prompt = model.confirm {
-                    GroupBox {
-                        VStack(alignment: .leading, spacing: 10) {
-                            Label(prompt, systemImage: "exclamationmark.triangle").font(.headline)
-                            Text("請核對下方本次掃描結果。確認後會執行；取消或關閉 App 不會自動確認。")
-                            HStack { Button("取消") { model.confirmAction(false) }; Spacer(); Button("確認繼續") { model.confirmAction(true) }.keyboardShortcut(.defaultAction) }
-                        }.padding(6)
+                    if model.runner.busy { TaskProgressCard(model: model) }
+                    if !(model.page?.command.isEmpty ?? true) { operationView }
+                    else {
+                        switch model.page {
+                        case .status: DashboardView(model: model)
+                        case .disk: DiskView(model: model)
+                        case .history: HistoryView(model: model)
+                        case .protection: protectionView
+                        case .settings: settingsView
+                        default: EmptyView()
+                        }
                     }
-                }
-                if !model.notice.isEmpty { Text(model.notice).foregroundColor(.orange).textSelection(.enabled) }
-                HStack { Text(model.runner.outcome).font(.caption).foregroundColor(.secondary); Spacer(); Button("匯出結果", action: model.exportLog).disabled(model.runner.log.isEmpty) }
-                DisclosureGroup("本次詳細結果", isExpanded: $logExpanded) {
-                    ScrollView { Text(model.runner.log.isEmpty ? "等待操作" : model.runner.log).font(.system(.caption, design: .monospaced)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }.frame(minHeight: 70, maxHeight: model.confirm == nil ? 180 : 280)
-                }
-            }.padding(24).frame(minWidth: 640, minHeight: 630)
+                    if model.selecting { selectionView }
+                    if let prompt = model.confirm { confirmationView(prompt: prompt) }
+                    if !model.runner.busy && !model.resultGuide.isEmpty { ResultGuideCard(model: model) }
+                    if !model.notice.isEmpty { Text(model.notice).foregroundColor(.orange).textSelection(.enabled) }
+                    HStack {
+                        Text(model.runner.outcome == "尚未執行" ? "準備就緒" : model.runner.outcome).font(.caption).foregroundColor(.secondary)
+                        Spacer()
+                        Button("匯出結果", action: model.exportLog).disabled(model.runner.log.isEmpty)
+                    }
+                    DisclosureGroup("詳細結果（需要時查看）", isExpanded: $logExpanded) {
+                        ScrollView {
+                            Text(model.runner.log.isEmpty ? "完成操作後，這裡會顯示詳細記錄。" : model.runner.log)
+                                .font(.system(.caption, design: .monospaced)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+                        }.frame(minHeight: 70, maxHeight: model.confirm == nil ? 180 : 280)
+                    }
+                }.padding(24).frame(maxWidth: .infinity, alignment: .leading)
+            }.frame(minWidth: 640, minHeight: 630)
         }.frame(minWidth: 860, minHeight: 690)
         .preferredColorScheme(appearance == "dark" ? .dark : (appearance == "light" ? .light : nil))
         .onChange(of: model.confirm) { value in if value != nil { logExpanded = true } }
         .onChange(of: model.configKind) { _ in model.configLoaded = false; model.configText = "" }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in model.cancel() }
     }
+    private var headerSubtitle: String {
+        guard let page = model.page, !page.subtitle.isEmpty else { return "選擇左側功能開始；Harbour 會先分析，再讓你決定是否修改資料。" }
+        return page.subtitle
+    }
     private var operationView: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(model.page?.subtitle ?? "").foregroundColor(.secondary)
+            GroupBox {
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: model.page?.icon ?? "wand.and.stars").font(.title2).foregroundColor(.accentColor).frame(width: 28)
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("你會做咩？").font(.headline)
+                        Text(model.actionInstructions).fixedSize(horizontal: false, vertical: true)
+                        Text(model.isSelectionOperation ? "安全提示：掃描期間不會刪除；最後確認前可取消。" : "安全提示：先預覽會顯示將要處理的內容，預覽本身不會刪除資料。")
+                            .font(.caption).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
+                    }
+                }.padding(8)
+            }
             if model.page == .clean { Toggle("包括需要管理員權限的系統項目", isOn: $model.admin).disabled(model.runner.busy) }
             if model.page == .external {
                 HStack { Text(model.externalPath.isEmpty ? "未選擇磁碟" : model.externalPath).lineLimit(1); Button("選擇磁碟…") { model.chooseFolder(external: true) }.disabled(model.runner.busy) }
             }
             HStack {
-                Button("預覽（不刪除）") { model.operate(false) }.disabled(model.runner.busy)
-                Button((model.page.map { [Page.uninstall, .purge, .installer].contains($0) } ?? false) ? "掃描並選擇清理項目" : "執行") { model.operate(true) }.disabled(model.runner.busy || !model.canApply)
+                if model.isSelectionOperation {
+                    Button("開始掃描") { model.operate(true) }.keyboardShortcut(.defaultAction).disabled(model.runner.busy)
+                    Text("掃描完成後再選擇項目").font(.caption).foregroundColor(.secondary)
+                } else {
+                    Button("預覽（不刪除）") { model.operate(false) }.disabled(model.runner.busy)
+                    Button("執行預覽內容") { model.operate(true) }.keyboardShortcut(.defaultAction).disabled(model.runner.busy || !model.canApply)
+                    if let status = model.previewStatus { Text(status).font(.caption).foregroundColor(.secondary) }
+                }
             }
+            if !model.isSelectionOperation && !model.canApply { Text("先完成預覽，執行按鈕才會啟用。").font(.caption).foregroundColor(.secondary) }
         }
     }
     private var selectionView: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(model.selectionTitle).font(.headline)
-            Text(model.selectionNote).font(.caption).foregroundColor(.secondary)
+        GroupBox {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Label("掃描完成", systemImage: "checkmark.circle.fill").font(.headline).foregroundColor(.accentColor)
+                    Spacer(); Text("找到 \(model.rows.count) 項").font(.caption).foregroundColor(.secondary)
+                }
+                Text("請勾選你確定要處理的項目。未勾選的內容會保留；按下一步後還會再顯示一次確認。")
+                Text(model.selectionNote).font(.caption).foregroundColor(.secondary)
+                Text(model.selectionTitle).font(.caption).foregroundColor(.secondary)
             HStack {
-                TextField("搜尋名稱或路徑", text: $model.query)
-                Button("全選搜尋結果") { model.selected.formUnion(model.visibleRows.map(\.id)) }
-                Button("取消全選") { model.selected = [] }
+                    TextField("搜尋名稱或路徑", text: $model.query).textFieldStyle(RoundedBorderTextFieldStyle())
+                    Button("全選") { model.selected.formUnion(model.visibleRows.map(\.id)) }.disabled(model.visibleRows.isEmpty)
+                    Button("清除選擇") { model.selected = [] }.disabled(model.selected.isEmpty)
             }
-            List(model.visibleRows) { row in
-                Toggle(isOn: Binding(get: { model.selected.contains(row.id) }, set: { yes in if yes { model.selected.insert(row.id) } else { model.selected.remove(row.id) } })) {
-                    VStack(alignment: .leading, spacing: 2) { Text(row.name); Text(row.detail).font(.caption).foregroundColor(.secondary); Text(row.path).font(.caption2).foregroundColor(.secondary).lineLimit(1).help(row.path) }
-                }.toggleStyle(CheckboxToggleStyle())
-            }.frame(minHeight: 170, maxHeight: 300)
-            HStack { Text("已選 \(model.selected.count)／\(model.rows.count) 項"); Spacer(); Button("繼續核對", action: model.submitSelection).disabled(model.selected.isEmpty) }
+                if model.visibleRows.isEmpty {
+                    VStack(spacing: 8) {
+                        Image(systemName: "magnifyingglass").font(.title2).foregroundColor(.secondary)
+                        Text(model.rows.isEmpty ? "沒有找到可處理項目" : "沒有符合搜尋的項目").foregroundColor(.secondary)
+                        Text(model.rows.isEmpty ? "你可以返回重新掃描，或到「詳細結果」查看原因。" : "清除搜尋文字即可查看全部項目。").font(.caption).foregroundColor(.secondary)
+                    }.frame(maxWidth: .infinity, minHeight: 120)
+                } else {
+                    List(model.visibleRows) { row in
+                        Toggle(isOn: Binding(get: { model.selected.contains(row.id) }, set: { yes in if yes { model.selected.insert(row.id) } else { model.selected.remove(row.id) } })) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(row.name)
+                                Text(model.friendlyDetail(row.detail)).font(.caption).foregroundColor(.secondary)
+                                DisclosureGroup("查看檔案位置") {
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(row.path).font(.caption2).foregroundColor(.secondary).textSelection(.enabled)
+                                        Text("技術資料：\(row.detail)").font(.caption2).foregroundColor(.secondary).textSelection(.enabled)
+                                    }.padding(.top, 2)
+                                }
+                            }
+                        }.toggleStyle(CheckboxToggleStyle())
+                    }.frame(minHeight: 170, maxHeight: 300)
+                }
+                HStack {
+                    Text("已選 \(model.selected.count) 項").font(.subheadline)
+                    Spacer()
+                    Button("下一步：查看會處理的資料", action: model.submitSelection).disabled(model.selected.isEmpty)
+                }
+            }.padding(8)
+        }
+    }
+    private func confirmationView(prompt: String) -> some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 10) {
+                Label(model.confirmationTitle, systemImage: "exclamationmark.triangle.fill").font(.headline).foregroundColor(.orange)
+                Text(model.confirmationMessage).fixedSize(horizontal: false, vertical: true)
+                Text("引擎提示：\(prompt)").font(.caption).foregroundColor(.secondary).textSelection(.enabled)
+                HStack {
+                    Button("取消並重新掃描") { model.confirmAction(false) }
+                    Spacer()
+                    Button("確認執行") { model.confirmAction(true) }.keyboardShortcut(.defaultAction)
+                }
+            }.padding(8)
         }
     }
     private var protectionView: some View {
@@ -336,20 +516,57 @@ struct ContentView: View {
                 GroupBox("外部 Mole CLI") {
                     VStack(alignment: .leading, spacing: 10) {
                         Text(model.cliPath).font(.caption).textSelection(.enabled)
-                        HStack { Button("選擇 mo…", action: model.chooseCLI); Button("偵測版本", action: model.cliVersion); Button("安裝 CLI") { model.bridge("install", apply: true) }; Button("更新 CLI", action: model.updateCLI) }
-                        HStack { Button("預覽移除 Mole") { model.bridge("remove", apply: false) }; Button("移除 Mole CLI／設定") { model.bridge("remove", apply: true) } }
+                        HStack { Button("選擇 mo…", action: model.chooseCLI); Button("偵測版本", action: model.cliVersion); Button("安裝 CLI") { model.bridge("install", apply: true, title: "安裝 Mole CLI", phase: "正在下載官方 CLI…") }; Button("更新 CLI", action: model.updateCLI) }
+                        HStack { Button("預覽移除 Mole") { model.bridge("remove", apply: false, title: "預覽移除 Mole", phase: "正在整理可移除的檔案…") }; Button("移除 Mole CLI／設定") { model.bridge("remove", apply: true, title: "移除 Mole CLI／設定", phase: "正在準備移除…") } }
                     }.padding(8).frame(maxWidth: .infinity, alignment: .leading)
                 }
                 GroupBox("Touch ID 與命令補完") {
                     VStack(alignment: .leading, spacing: 10) {
                         Text("2016 年 12 吋 MacBook 沒有 Touch ID；配備 Touch Bar 的 MacBook Pro 才有相關硬件。")
-                        HStack { Button("Touch ID 狀態") { model.bridge("touchid", apply: false, args: ["status"]) }; Button("啟用") { model.bridge("touchid", apply: true, args: ["enable"]) }; Button("停用") { model.bridge("touchid", apply: true, args: ["disable"]) } }
-                        HStack { Text("產生補完腳本："); ForEach(["zsh", "bash", "fish"], id: \.self) { shell in Button(shell) { model.bridge("completion", apply: false, args: [shell]) } } }
+                        HStack { Button("Touch ID 狀態") { model.bridge("touchid", apply: false, args: ["status"], title: "查看 Touch ID 狀態", phase: "正在檢查硬件支援…") }; Button("啟用") { model.bridge("touchid", apply: true, args: ["enable"], title: "啟用 Touch ID sudo", phase: "正在準備修改設定…") }; Button("停用") { model.bridge("touchid", apply: true, args: ["disable"], title: "停用 Touch ID sudo", phase: "正在準備修改設定…") } }
+                        HStack { Text("產生補完腳本："); ForEach(["zsh", "bash", "fish"], id: \.self) { shell in Button(shell) { model.bridge("completion", apply: false, args: [shell], title: "產生 \(shell) 補完腳本", phase: "正在產生腳本…") } } }
                     }.padding(8).frame(maxWidth: .infinity, alignment: .leading)
                 }
-                Text("Harbour 0.3.0 · Intel / macOS 12+\nMole © tw93 與貢獻者 · GPL-3.0\n本 App 為獨立開源 GUI，並非官方 Mole for Mac。").font(.caption).foregroundColor(.secondary)
+                Text("Harbour 0.3.1 · Intel / macOS 12+\nMole © tw93 與貢獻者 · GPL-3.0\n本 App 為獨立開源 GUI，並非官方 Mole for Mac。").font(.caption).foregroundColor(.secondary)
             }.disabled(model.runner.busy)
         }.frame(minHeight: 360)
+    }
+}
+
+struct TaskProgressCard: View {
+    @ObservedObject var model: AppModel
+    var body: some View {
+        GroupBox {
+            HStack(alignment: .top, spacing: 12) {
+                ProgressView().controlSize(.regular)
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack {
+                        Text(model.runner.taskTitle.isEmpty ? "正在處理" : model.runner.taskTitle).font(.headline)
+                        Spacer()
+                        Text(model.elapsedText).font(.caption).foregroundColor(.secondary).monospacedDigit()
+                    }
+                    Text(model.runner.taskPhase.isEmpty ? "正在準備…" : model.runner.taskPhase)
+                    Text(model.progressMessage).font(.caption).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+            }.padding(8)
+        }
+    }
+}
+
+struct ResultGuideCard: View {
+    @ObservedObject var model: AppModel
+    var body: some View {
+        let warning = model.runner.outcome.contains("未完整") || model.runner.outcome.contains("取消") || model.runner.outcome.contains("停止")
+        return GroupBox {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: warning ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                    .foregroundColor(warning ? .orange : .green).font(.title2)
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(warning ? "需要留意" : "下一步").font(.headline)
+                    Text(model.resultGuide).fixedSize(horizontal: false, vertical: true)
+                }
+            }.padding(8)
+        }
     }
 }
 

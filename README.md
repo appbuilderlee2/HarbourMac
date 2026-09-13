@@ -1,8 +1,8 @@
 # Harbour — Monterey GUI for Mole
 
-開發預覽 0.2.0。目標：Intel MacBook 2016、macOS Monterey 12.7.6。
+Harbour 0.3.1（Intel Mac、macOS Monterey 12.7.6）。這是一個以 SwiftUI 製作的繁體中文 GUI，讓普通用家可以先預覽、再確認，安全地使用 Mole 的清理及維護功能。
 
-這份交付是 SwiftUI 原始碼，**並非已編譯、已測試的 App**。產生環境為 Linux，沒有 Apple SDK 或 Swift 編譯器；macOS 編譯、UI、真實 Mole 整合及實機測試仍待完成。
+GitHub Release 會提供由 macOS Intel runner 建置的 `Harbour-Intel.dmg`；亦可在 Mac 上按下方指令自行建置。
 
 ## 已實作
 
@@ -11,8 +11,17 @@
 - CPU／記憶體圖形、資料夾容量列表、Finder 定位、原始輸出。
 - 獨立參數啟動（不使用 shell 插值）、錯誤顯示、停止、5 分鐘逾時、16 MB 輸出限制。
 - 真正執行使用者層清理；先 dry-run 預覽，再由 GUI 確認。
-- 掃描已安裝 App、多選、dry-run 移除預覽、最後確認及真正移到垃圾桶。
+- 掃描已安裝 App、開發檔案及安裝檔，多選、最後確認及真正移除／移到垃圾桶。
+- 掃描時顯示目前階段、已用時間及「尚未刪除」提示；結果以「發現什麼／下一步做什麼」顯示，技術路徑收在可展開的詳細資料。
+- 系統維護、外置磁碟、白名單、Touch ID 狀態及 shell completion GUI。
 - Intel .app／.dmg 打包腳本。
+
+## 基本使用流程
+
+1. 從左側選擇「清理」、「移除 App」、「開發檔案」或「安裝檔」。
+2. 先按「預覽（不刪除）」或「開始掃描」，等待畫面顯示掃描完成。
+3. 如有清單，勾選要處理的項目，再按「下一步：查看會處理的資料」。
+4. 閱讀最後確認卡片，按「確認執行」才會真正修改資料；不確定就按「取消並重新掃描」。
 
 ## 在 Mac 建置
 
@@ -20,7 +29,7 @@
 2. 按 https://github.com/tw93/Mole#quick-start 安裝 Mole CLI。
 3. Terminal 進入本資料夾，執行 `bash scripts/build.command`。
 4. 成功後開啟 `dist/Harbour.app`。設定中可選擇 `mo` 執行檔，Intel 通常在 `/usr/local/bin/mo`。
-5. 選頁面再按更新資料／掃描清理預覽。
+5. 選頁面再按更新資料／掃描清理預覽。首次 App 掃描可能需幾分鐘；掃描期間可以按「停止」。
 
 腳本使用本機 ad-hoc 簽署，沒有 Developer ID 公證。跨電腦分發仍需正式簽署／公證或按 macOS 的使用者允許流程開啟。
 
@@ -28,9 +37,7 @@
 
 `mo clean` 在 GUI 非互動環境會自動完成使用者層清理；只有已有有效 sudo session 時才包括系統層清理。`mo uninstall` 如需管理員權限，Mole 自己會顯示原生密碼視窗。Harbour 不讀取或保存密碼。
 
-操作紀錄目前顯示 JSON。監控為按鈕取得快照。系統維護及清理白名單 GUI 尚未接入。
-
-下一步必須先在 macOS 編譯修正、確認最新 CLI 回傳 schema、測試權限不足／取消／大型掃描，再接入清理執行與權限處理。
+操作紀錄保留原始詳細資料，方便需要時檢查；一般使用者只需跟隨畫面上的進度及下一步提示。監控可取得單次快照或每 2 秒更新。
 
 ## Attribution
 

@@ -63,6 +63,8 @@ struct DashboardView: View {
             if model.snapshot.isEmpty { Text("按更新快照取得真實系統資料。").foregroundColor(.secondary) }
             else {
                 Text(display(model.snapshot["host"]) + " · " + display(model.snapshot["uptime"])).font(.headline)
+                Text("以下資料只作查看，不會修改或清理你的 Mac。CPU、記憶體及電池讀數會因使用情況變動。")
+                    .font(.caption).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
                 HStack {
                     Metric(title: "CPU", value: number(dictionary(model.snapshot["cpu"])["usage"]))
                     Metric(title: "記憶體", value: number(dictionary(model.snapshot["memory"])["used_percent"]))
@@ -99,7 +101,13 @@ struct DiskView: View {
                 Toggle("按名稱", isOn: $model.sortByName)
             }.disabled(model.runner.busy)
             if let report = model.disk {
-                Text("\(bytes(report.total_size)) · \(report.total_files ?? 0) 個檔案").font(.headline)
+                GroupBox("分析結果") {
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text("\(bytes(report.total_size)) · \(report.total_files ?? 0) 個檔案").font(.headline)
+                        Text("列表按大小排序；分析本身不會刪除資料。先查看最大項目，再決定是否移到垃圾桶。")
+                            .font(.caption).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
+                    }.padding(8).frame(maxWidth: .infinity, alignment: .leading)
+                }
                 List(model.diskRows, selection: $model.diskSelection) { entry in
                     HStack {
                         Image(systemName: entry.is_dir == true ? "folder" : "doc")
@@ -117,7 +125,15 @@ struct DiskView: View {
                     Text("按 ⌘ 可多選").font(.caption).foregroundColor(.secondary)
                     Spacer(); Button("移到垃圾桶", action: model.trashFiles).disabled(model.runner.busy || model.diskSelection.isEmpty)
                 }
-            } else { Text("分析資料夾或外置磁碟，查看容量分布及大型檔案。").foregroundColor(.secondary) }
+            } else {
+                GroupBox("未開始分析") {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("按「重新分析」即可查看這個資料夾佔用的空間。")
+                        Text("分析只會讀取檔案大小，不會刪除或移動任何內容。")
+                            .font(.caption).foregroundColor(.secondary)
+                    }.padding(8).frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
         }
     }
     private func quickLook(_ path: String) {

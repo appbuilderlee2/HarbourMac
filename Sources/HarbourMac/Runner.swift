@@ -19,18 +19,19 @@ final class StreamCapture: @unchecked Sendable {
     @Published var busy = false
     @Published var log = ""
     @Published var outcome = "尚未執行"
+    @Published var taskTitle = ""
+    @Published var taskPhase = ""
+    @Published var startedAt: Date?
+    @Published var elapsedSeconds = 0
     var onEvent: ((BridgeEvent) -> Void)?
     var onLine: ((String) -> Void)?
     private var process: Process?
     private var input: FileHandle?
     private var timer: Timer?
+    private var progressTimer: Timer?
     private var stopped = false
     private var runID = UUID()
-    var resourceURL: URL {
-        let packaged = Bundle.main.resourceURL!.appendingPathComponent("HarbourMac_HarbourMac.bundle/Resources")
-        if FileManager.default.fileExists(atPath: packaged.appendingPathComponent("bridge.sh").path) { return packaged }
-        return Bundle.module.resourceURL!.appendingPathComponent("Resources")
-    }
+    var resourceURL: URL { Bundle.module.resourceURL!.appendingPathComponent("Resources") }
     var engineURL: URL { resourceURL.appendingPathComponent("Engine") }
     var workerURL: URL { Bundle.main.executableURL!.deletingLastPathComponent().appendingPathComponent("HarbourWorker") }
 
@@ -55,7 +56,12 @@ final class StreamCapture: @unchecked Sendable {
     func start(_ executable: URL, _ arguments: [String], environment extras: [String: String] = [:], timeout: TimeInterval = 1800, completion: ((Data, Int32) -> Void)? = nil) {
         guard !busy else { return }
         guard FileManager.default.isExecutableFile(atPath: workerURL.path) else { outcome = "缺少 HarbourWorker；請用 build.command 完整打包 App。"; return }
-        busy = true; stopped = false; log = ""; outcome = "執行中"
+        busy = true; stopped = false; log = ""; outcome = "執行中"; startedAt = Date(); elapsedSeconds = 0; taskPhase = "正在準備…"
+        progressTimer?.invalidate()
+        progressTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            guard let self = self, self.busy else { return }
+            self.elapsedSeconds += 1
+        }
         runID = UUID()
         let token = UUID().uuidString
         let process = Process(), stdout = Pipe(), stderr = Pipe(), stdinPipe = Pipe()
@@ -103,8 +109,9 @@ final class StreamCapture: @unchecked Sendable {
             let result = capture.result()
             DispatchQueue.main.async {
                 guard let self = self else { return }
-                self.timer?.invalidate(); self.timer = nil
+                self.timer?.invalidate(); self.timer = nil; self.progressTimer?.invalidate(); self.progressTimer = nil
                 try? self.input?.close(); self.input = nil; self.process = nil; self.busy = false
+                self.startedAt = nil
                 let rc: Int32 = self.stopped ? 130 : ((!drainOK || result.1) ? 74 : task.terminationStatus)
                 self.outcome = rc == 0 ? "操作結束；請查看結果中的略過或失敗項目" : (rc == 130 ? "已停止／取消；已完成的操作不會自動復原" : "操作未完整完成（\(rc)），請查看詳細結果")
                 completion?(result.0, rc)
