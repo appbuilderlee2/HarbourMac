@@ -55,7 +55,7 @@ final class StreamCapture: @unchecked Sendable {
     }
     func start(_ executable: URL, _ arguments: [String], environment extras: [String: String] = [:], timeout: TimeInterval = 1800, completion: ((Data, Int32) -> Void)? = nil) {
         guard !busy else { return }
-        guard FileManager.default.isExecutableFile(atPath: workerURL.path) else { outcome = "缺少 HarbourWorker；請用 build.command 完整打包 App。"; return }
+        guard FileManager.default.isExecutableFile(atPath: workerURL.path) else { outcome = "缺少 HarbourWorker；請用 build.command 完整打包 App。"; completion?(Data(), 127); return }
         busy = true; stopped = false; log = ""; outcome = "執行中"; startedAt = Date(); elapsedSeconds = 0; taskPhase = "正在準備…"
         progressTimer?.invalidate()
         progressTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
@@ -129,7 +129,10 @@ final class StreamCapture: @unchecked Sendable {
             }
         } catch {
             try? stdout.fileHandleForWriting.close(); try? stderr.fileHandleForWriting.close()
+            progressTimer?.invalidate(); progressTimer = nil; startedAt = nil
+            try? stdinPipe.fileHandleForWriting.close()
             busy = false; outcome = error.localizedDescription
+            completion?(Data(), 127)
         }
     }
     private func appendLog(_ text: String) {

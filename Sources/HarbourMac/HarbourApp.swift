@@ -4,13 +4,14 @@ import Combine
 import HarbourCore
 
 enum Page: String, CaseIterable, Identifiable {
+    case updates = "軟體更新", login = "登入項目", accessories = "配件電量", fans = "風扇狀態"
     case status = "系統監察", disk = "磁碟瀏覽", clean = "清理", uninstall = "移除 App", optimize = "系統維護", purge = "開發檔案", installer = "安裝檔", external = "外置磁碟", history = "操作紀錄", protection = "保護及路徑", settings = "設定及更新"
     var id: String { rawValue }
     var command: String {
         switch self { case .clean: return "clean"; case .uninstall: return "uninstall"; case .optimize: return "optimize"; case .purge: return "purge"; case .installer: return "installer"; case .external: return "external"; default: return "" }
     }
     var icon: String {
-        switch self { case .status: return "waveform.path.ecg"; case .disk: return "internaldrive"; case .clean: return "sparkles"; case .uninstall: return "app.badge"; case .optimize: return "wrench.and.screwdriver"; case .purge: return "chevron.left.forwardslash.chevron.right"; case .installer: return "shippingbox"; case .external: return "externaldrive"; case .history: return "clock"; case .protection: return "checkmark.shield"; case .settings: return "gearshape" }
+        switch self { case .updates: return "arrow.down.circle"; case .login: return "power"; case .accessories: return "battery.100"; case .fans: return "wind"; case .status: return "waveform.path.ecg"; case .disk: return "internaldrive"; case .clean: return "sparkles"; case .uninstall: return "app.badge"; case .optimize: return "wrench.and.screwdriver"; case .purge: return "chevron.left.forwardslash.chevron.right"; case .installer: return "shippingbox"; case .external: return "externaldrive"; case .history: return "clock"; case .protection: return "checkmark.shield"; case .settings: return "gearshape" }
     }
     var subtitle: String {
         switch self {
@@ -348,17 +349,32 @@ struct ContentView: View {
     @ObservedObject var model: AppModel
     @AppStorage("appearance") private var appearance = "system"
     @State private var logExpanded = false
+    @StateObject private var systemTools = SystemTools()
     var body: some View {
         NavigationView {
-            List(Page.allCases, selection: $model.page) { page in Label(page.rawValue, systemImage: page.icon).tag(page) }
+            List(selection: $model.page) {
+                Section("太陽系") {
+                    ForEach([Page.status, .clean, .updates, .uninstall, .disk, .login, .accessories, .fans]) { page in
+                        HStack(spacing: 8) {
+                            PlanetOrb(page: page, size: 18)
+                            Text(page.rawValue)
+                        }.tag(page)
+                    }
+                }
+                Section("工具") {
+                    ForEach([Page.optimize, .purge, .installer, .external, .history, .protection, .settings]) { page in
+                        Label(page.rawValue, systemImage: page.icon).tag(page)
+                    }
+                }
+            }
                 .listStyle(SidebarListStyle()).frame(minWidth: 175, idealWidth: 190).disabled(model.runner.busy)
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     HStack(alignment: .top) {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(model.page?.rawValue ?? "Harbour").font(.largeTitle.bold())
+                            PlanetHeader(page: model.page ?? .status)
                             Text(headerSubtitle).font(.caption).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
-                            Text("Harbour 0.3.1 · Intel / macOS 12+").font(.caption2).foregroundColor(.secondary)
+                            Text("Harbour 0.4.0 · Intel / macOS 12+").font(.caption2).foregroundColor(.secondary)
                         }
                         Spacer()
                         if model.runner.busy {
@@ -369,7 +385,13 @@ struct ContentView: View {
                     if !(model.page?.command.isEmpty ?? true) { operationView }
                     else {
                         switch model.page {
-                        case .status: DashboardView(model: model)
+                        case .status:
+                            SolarOverview(model: model)
+                            DashboardView(model: model)
+                        case .updates: SoftwareUpdatesView(model: model, tools: systemTools)
+                        case .login: LoginItemsView(model: model, tools: systemTools)
+                        case .accessories: AccessoriesView(model: model, tools: systemTools)
+                        case .fans: FanStatusView(model: model)
                         case .disk: DiskView(model: model)
                         case .history: HistoryView(model: model)
                         case .protection: protectionView
@@ -527,7 +549,7 @@ struct ContentView: View {
                         HStack { Text("產生補完腳本："); ForEach(["zsh", "bash", "fish"], id: \.self) { shell in Button(shell) { model.bridge("completion", apply: false, args: [shell], title: "產生 \(shell) 補完腳本", phase: "正在產生腳本…") } } }
                     }.padding(8).frame(maxWidth: .infinity, alignment: .leading)
                 }
-                Text("Harbour 0.3.1 · Intel / macOS 12+\nMole © tw93 與貢獻者 · GPL-3.0\n本 App 為獨立開源 GUI，並非官方 Mole for Mac。").font(.caption).foregroundColor(.secondary)
+                Text("Harbour 0.4.0 · Intel / macOS 12+\nMole © tw93 與貢獻者 · GPL-3.0\n本 App 為獨立開源 GUI，並非官方 Mole for Mac。").font(.caption).foregroundColor(.secondary)
             }.disabled(model.runner.busy)
         }.frame(minHeight: 360)
     }
