@@ -1,5 +1,7 @@
 import Foundation
+#if canImport(FoundationXML)
 import FoundationXML
+#endif
 
 public enum SystemData {
     public static func percentage(_ value: Any?) -> Double? {
@@ -23,8 +25,8 @@ public enum SystemData {
               let casks = root["casks"] as? [[String: Any]] else {
             throw SystemDataError.invalidResponse
         }
-        return [(formulae, false), (casks, true)].flatMap { rows, cask in
-            rows.compactMap { row in
+        return [(formulae, false), (casks, true)].flatMap { rows, cask -> [PackageUpdate] in
+            rows.compactMap { row -> PackageUpdate? in
                 guard let name = row["name"] as? String, !name.isEmpty,
                       name.range(of: #"^[A-Za-z0-9][A-Za-z0-9@+._/-]*$"#, options: .regularExpression) != nil,
                       let latest = row["current_version"] as? String else { return nil }
