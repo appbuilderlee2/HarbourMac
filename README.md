@@ -1,45 +1,55 @@
-# Harbour — Monterey GUI for Mole
+# Harbour — Planet UI for Mole
 
-Harbour 0.3.1（Intel Mac、macOS Monterey 12.7.6）。這是一個以 SwiftUI 製作的繁體中文 GUI，讓普通用家可以先預覽、再確認，安全地使用 Mole 的清理及維護功能。
+Harbour 0.4.0 是支援 Intel Mac / macOS 12+ 的原生 SwiftUI GUI，內置固定版本 Mole 1.53.0 引擎。
 
-GitHub Release 會提供由 macOS Intel runner 建置的 `Harbour-Intel.dmg`；亦可在 Mac 上按下方指令自行建置。
+## 太陽系導覽
 
-## 已實作
+太陽為系統總覽；地球清理；火星管理軟體；木星瀏覽磁碟；土星查看登入項目；天王星查看配件電量；海王星顯示唯讀風扇及溫度。保留原有預覽、選取及最後確認流程。
 
-- 原生側邊欄、系統深淺色、繁體中文。
-- 調用已安裝的 Mole：status、analyze、clean、uninstall、history。
-- CPU／記憶體圖形、資料夾容量列表、Finder 定位、原始輸出。
-- 獨立參數啟動（不使用 shell 插值）、錯誤顯示、停止、5 分鐘逾時、16 MB 輸出限制。
-- 真正執行使用者層清理；先 dry-run 預覽，再由 GUI 確認。
-- 掃描已安裝 App、開發檔案及安裝檔，多選、最後確認及真正移除／移到垃圾桶。
-- 掃描時顯示目前階段、已用時間及「尚未刪除」提示；結果以「發現什麼／下一步做什麼」顯示，技術路徑收在可展開的詳細資料。
-- 系統維護、外置磁碟、白名單、Touch ID 狀態及 shell completion GUI。
-- Intel .app／.dmg 打包腳本。
+## 新功能與實際範圍
 
-## 基本使用流程
+- **Homebrew 更新**：使用本機目錄檢查 formula/cask；可另外更新 Homebrew 目錄，再檢查。每個安裝操作需要確認。Homebrew 可能更新必要依賴；需要密碼／互動的安裝請使用 Terminal。自動更新 App、latest cask 或釘選套件可能略過，零筆結果不代表所有 App 均最新。
+- **App Store**：已裝 mas 時執行 outdated；缺少 mas 或檢查失敗時顯示原因。安裝交由 App Store。
+- **Sparkle**：掃描 /Applications 及 ~/Applications，辨識 SUFeedURL。按「檢查來源」才連線至該 App 的 HTTPS feed；解析穩定版本及最低系統版本。僅比較數字版本；結果為來源提示，不是完整硬體、架構或更新資格判定。更新交回 App，Harbour 不下載 enclosure、不繞過簽章驗證。來源轉址或格式不支援時請在 App 內檢查。
+- **登入項目**：使用唯讀 JXA 列出傳統登入項目；可能要求 System Events 自動化權限。列出使用者／全機 LaunchAgents 與 LaunchDaemons 檔案，檔案存在不代表啟用或正在執行。新式背景項目、啟用／停用在系統設定管理；不刪 plist、不執行 bootout。
+- **配件電量**：直接解析 system_profiler 的 Bluetooth JSON，分別顯示左右耳／充電盒、連線狀態及讀取時間。不提供電量時顯示未知，0% 保留；未連線項目明確標示可能為舊資料。
+- **風扇狀態**：讀取內置 Mole 的 thermal 快照。顯示單一引擎轉速欄位、風扇數量、CPU/GPU/電池溫度及時間；非逐風扇資料。零值與缺失值均標示未提供，不推定風扇停止或無風扇。無 SMC 寫入、無調速、無提權。
 
-1. 從左側選擇「清理」、「移除 App」、「開發檔案」或「安裝檔」。
-2. 先按「預覽（不刪除）」或「開始掃描」，等待畫面顯示掃描完成。
-3. 如有清單，勾選要處理的項目，再按「下一步：查看會處理的資料」。
-4. 閱讀最後確認卡片，按「確認執行」才會真正修改資料；不確定就按「取消並重新掃描」。
+所有磁碟清理及掃描在本機執行；使用者主動檢查更新時會連線至對應更新服務。
 
-## 在 Mac 建置
+## 原有功能
 
-1. 安裝與 Monterey 相容的 Xcode 14.2 或 Swift 5.7+ Command Line Tools。
-2. 按 https://github.com/tw93/Mole#quick-start 安裝 Mole CLI。
-3. Terminal 進入本資料夾，執行 `bash scripts/build.command`。
-4. 成功後開啟 `dist/Harbour.app`。設定中可選擇 `mo` 執行檔，Intel 通常在 `/usr/local/bin/mo`。
-5. 選頁面再按更新資料／掃描清理預覽。首次 App 掃描可能需幾分鐘；掃描期間可以按「停止」。
+系統快照／持續監察、磁碟容量分析、Finder 定位、操作紀錄、清理預覽、App／開發檔案／安裝檔選取、最後確認、系統維護、外置磁碟、保護清單與外部 CLI 管理。停止會終止工作程序群組，但已完成的修改不會自動還原。
 
-腳本使用本機 ad-hoc 簽署，沒有 Developer ID 公證。跨電腦分發仍需正式簽署／公證或按 macOS 的使用者允許流程開啟。
+## 建置與測試
 
-## 清理與權限
+在 Intel Mac 安裝 Swift 5.7+ / Xcode Command Line Tools：
 
-`mo clean` 在 GUI 非互動環境會自動完成使用者層清理；只有已有有效 sudo session 時才包括系統層清理。`mo uninstall` 如需管理員權限，Mole 自己會顯示原生密碼視窗。Harbour 不讀取或保存密碼。
+    swift test
+    python3 Tests/test_transport.py
+    bash scripts/build.command
 
-操作紀錄保留原始詳細資料，方便需要時檢查；一般使用者只需跟隨畫面上的進度及下一步提示。監控可取得單次快照或每 2 秒更新。
+產物為 dist/Harbour-Intel.dmg。打包使用內置引擎，毋須先安裝外部 Mole CLI。外部 CLI 可另行設定。GitHub pull request 會執行 macOS 測試及 Intel DMG 建置。
 
-## Attribution
+打包使用 ad-hoc 簽署，並未 Developer ID 公證。跨電腦執行須遵循 macOS 正常使用者允許流程。
 
-Mole: https://github.com/tw93/Mole — tw93 and contributors, GPL-3.0.
-Harbour is an independent frontend, not the official Mole for Mac. No upstream source or binary is bundled. This project's original source is provided under MIT; any later inclusion of upstream code must retain its applicable license.
+## 實機驗收
+
+CI 無法驗證私人 Mac 的 TCC 權限及硬體。請在 macOS 12 實測：
+
+1. 深／淺色、窄視窗、鍵盤導覽；原有清理仍先預覽再確認。
+2. 無 Homebrew／mas、離線、檢查失敗；不能顯示成全部最新。
+3. Homebrew 單項確認／取消、更新後重新掃描；不得批量升級未選套件（必要依賴除外）。
+4. Sparkle 來源失敗、過新 macOS 要求及非數字版本，均能交回原 App 核對。
+5. 接受／拒絕 System Events 權限；核對登入項目，管理時開啟正確系統頁面。
+6. AirPods 左右耳／充電盒、滑鼠、0%／無電量及斷線配件。
+7. 有／無風扇及無感測器機型，不將缺失資料顯示為正常或風扇停止。
+
+## Attribution / License
+
+Harbour 是獨立開源前端，並非官方 Mole for Mac。
+內置 Mole 原始碼及 Intel 執行檔來自 tw93 與貢獻者，依 GPL-3.0 發佈；版本來源見 Sources/HarbourMac/Resources/Engine/UPSTREAM.json。本 repository 的 LICENSE 為 GPL-3.0；保留上游版權及授權。
+
+- Mole: https://github.com/tw93/Mole
+- Homebrew commands: https://docs.brew.sh/Manpage
+- Sparkle metadata: https://sparkle-project.org/documentation/publishing/
