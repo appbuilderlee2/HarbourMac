@@ -32,7 +32,7 @@ cat > "$app_path/Contents/Info.plist" <<'PLIST'
 <key>CFBundleIdentifier</key><string>local.harbour.mac</string>
 <key>CFBundleName</key><string>Harbour</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>0.4.0</string>
+<key>CFBundleShortVersionString</key><string>0.4.1</string>
 <key>CFBundleVersion</key><string>40</string>
 <key>LSMinimumSystemVersion</key><string>12.0</string>
 <key>NSAppleEventsUsageDescription</key><string>Harbour 只會讀取登入項目的名稱、位置及隱藏狀態，供你在系統設定管理。</string>

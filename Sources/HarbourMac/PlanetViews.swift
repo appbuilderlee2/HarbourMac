@@ -5,25 +5,21 @@ import HarbourCore
 extension Page {
     var planetName: String {
         switch self {
-        case .status: return "太陽"
-        case .clean: return "地球"
-        case .uninstall, .updates: return "火星"
+        case .status, .accessories, .fans: return "太陽"
+        case .clean, .purge, .installer, .external: return "地球"
+        case .uninstall, .updates, .login: return "火星"
+        case .optimize: return "水星"
         case .disk: return "木星"
-        case .login: return "土星"
-        case .accessories: return "天王星"
-        case .fans: return "海王星"
         default: return ""
         }
     }
     var planetColor: Color {
         switch self {
-        case .status: return .orange
-        case .clean: return .blue
-        case .uninstall, .updates: return .red
+        case .status, .accessories, .fans: return .orange
+        case .clean, .purge, .installer, .external: return .blue
+        case .uninstall, .updates, .login: return .red
+        case .optimize: return .gray
         case .disk: return .brown
-        case .login: return .yellow
-        case .accessories: return .cyan
-        case .fans: return .indigo
         default: return .gray
         }
     }
@@ -41,7 +37,7 @@ struct PlanetOrb: View {
                                          startPoint: .topLeading, endPoint: .bottomTrailing))
                 .overlay(Circle().stroke(.white.opacity(0.2), lineWidth: 0.7))
                 .frame(width: size, height: size)
-            if page == .login {
+            if page == .disk {
                 Ellipse().stroke(page.planetColor.opacity(0.8), lineWidth: max(2, size * 0.08))
                     .frame(width: size * 1.55, height: size * 0.4).rotationEffect(.degrees(-25))
             }
@@ -57,14 +53,13 @@ struct PlanetHeader: View {
     let page: Page
     var body: some View {
         HStack(spacing: 20) {
-            PlanetOrb(page: page, size: 64)
+            PlanetOrb(page: page, size: 44)
             VStack(alignment: .leading, spacing: 6) {
                 Text(page.planetName.isEmpty ? "Harbour" : page.planetName).font(.caption).foregroundColor(.secondary)
-                Text(page.rawValue).font(.largeTitle.bold())
+                Text(page.rawValue).font(.system(size: 26, weight: .semibold, design: .rounded))
             }
             Spacer()
-        }.padding(18).frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 20).fill(page.planetColor.opacity(0.08)))
+        }.padding(.vertical, 8).frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

@@ -1,6 +1,6 @@
 # Harbour — Planet UI for Mole
 
-Harbour 0.4.0 是支援 Intel Mac / macOS 12+ 的原生 SwiftUI GUI，內置固定版本 Mole 1.53.0 引擎。
+Harbour 0.4.1 是支援 Intel Mac / macOS 12+ 的原生 SwiftUI GUI，內置固定版本 Mole 1.53.0 引擎。
 
 ## 太陽系導覽
 

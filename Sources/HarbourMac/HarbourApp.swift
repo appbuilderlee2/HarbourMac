@@ -351,30 +351,15 @@ struct ContentView: View {
     @State private var logExpanded = false
     @StateObject private var systemTools = SystemTools()
     var body: some View {
-        NavigationView {
-            List(selection: $model.page) {
-                Section("太陽系") {
-                    ForEach([Page.status, .clean, .updates, .uninstall, .disk, .login, .accessories, .fans]) { page in
-                        HStack(spacing: 8) {
-                            PlanetOrb(page: page, size: 18)
-                            Text(page.rawValue)
-                        }.tag(page)
-                    }
-                }
-                Section("工具") {
-                    ForEach([Page.optimize, .purge, .installer, .external, .history, .protection, .settings]) { page in
-                        Label(page.rawValue, systemImage: page.icon).tag(page)
-                    }
-                }
-            }
-                .listStyle(SidebarListStyle()).frame(minWidth: 175, idealWidth: 190).disabled(model.runner.busy)
+        VStack(spacing: 0) {
+            ObservatoryNavigation(model: model)
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     HStack(alignment: .top) {
                         VStack(alignment: .leading, spacing: 4) {
                             PlanetHeader(page: model.page ?? .status)
                             Text(headerSubtitle).font(.caption).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
-                            Text("Harbour 0.4.0 · Intel / macOS 12+").font(.caption2).foregroundColor(.secondary)
+                            Text("Harbour 0.4.1 · Intel / macOS 12+").font(.caption2).foregroundColor(.secondary)
                         }
                         Spacer()
                         if model.runner.busy {
@@ -386,7 +371,6 @@ struct ContentView: View {
                     else {
                         switch model.page {
                         case .status:
-                            SolarOverview(model: model)
                             DashboardView(model: model)
                         case .updates: SoftwareUpdatesView(model: model, tools: systemTools)
                         case .login: LoginItemsView(model: model, tools: systemTools)
@@ -417,13 +401,14 @@ struct ContentView: View {
                 }.padding(24).frame(maxWidth: .infinity, alignment: .leading)
             }.frame(minWidth: 640, minHeight: 630)
         }.frame(minWidth: 860, minHeight: 690)
+        .background(ObservatoryBackground(page: model.page ?? .clean))
         .preferredColorScheme(appearance == "dark" ? .dark : (appearance == "light" ? .light : nil))
         .onChange(of: model.confirm) { value in if value != nil { logExpanded = true } }
         .onChange(of: model.configKind) { _ in model.configLoaded = false; model.configText = "" }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in model.cancel() }
     }
     private var headerSubtitle: String {
-        guard let page = model.page, !page.subtitle.isEmpty else { return "選擇左側功能開始；Harbour 會先分析，再讓你決定是否修改資料。" }
+        guard let page = model.page, !page.subtitle.isEmpty else { return "從上方選擇功能；先查看結果，再決定下一步。" }
         return page.subtitle
     }
     private var operationView: some View {
@@ -549,7 +534,7 @@ struct ContentView: View {
                         HStack { Text("產生補完腳本："); ForEach(["zsh", "bash", "fish"], id: \.self) { shell in Button(shell) { model.bridge("completion", apply: false, args: [shell], title: "產生 \(shell) 補完腳本", phase: "正在產生腳本…") } } }
                     }.padding(8).frame(maxWidth: .infinity, alignment: .leading)
                 }
-                Text("Harbour 0.4.0 · Intel / macOS 12+\nMole © tw93 與貢獻者 · GPL-3.0\n本 App 為獨立開源 GUI，並非官方 Mole for Mac。").font(.caption).foregroundColor(.secondary)
+                Text("Harbour 0.4.1 · Intel / macOS 12+\nMole © tw93 與貢獻者 · GPL-3.0\n本 App 為獨立開源 GUI，並非官方 Mole for Mac。").font(.caption).foregroundColor(.secondary)
             }.disabled(model.runner.busy)
         }.frame(minHeight: 360)
     }
