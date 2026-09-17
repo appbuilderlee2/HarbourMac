@@ -27,6 +27,9 @@ case "$command_name" in
     clean|external)
         source "$ENGINE/bin/clean.sh"
         setup_auth
+        if [[ "$command_name" == clean && "$mode" == preview ]]; then
+            harbour_clean_preview_hook() { emit_harbour_clean_preview "$1"; }
+        fi
         args=()
         [[ "$mode" != preview ]] || args+=(--dry-run)
         if [[ "$command_name" == external ]]; then
