@@ -58,17 +58,14 @@ struct DashboardView: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Button("更新快照") { model.loadStatus(live: false) }.disabled(model.runner.busy)
-                Button(model.watch ? "停止監察" : "持續監察（每 2 秒）") { if model.watch { model.cancel() } else { model.loadStatus(live: true) } }.disabled(model.runner.busy && !model.watch)
+                Button(model.watch ? "停止監察" : "持續監察（約每 2 秒）") { if model.watch { model.cancel() } else { model.loadStatus(live: true) } }.disabled(model.runner.busy && !model.watch)
             }
+            StatusTrendsView(model: model)
             if model.snapshot.isEmpty { Text("按更新快照取得真實系統資料。").foregroundColor(.secondary) }
             else {
                 Text(display(model.snapshot["host"]) + " · " + display(model.snapshot["uptime"])).font(.headline)
                 Text("以下資料只作查看，不會修改或清理你的 Mac。CPU、記憶體及電池讀數會因使用情況變動。")
                     .font(.caption).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
-                HStack {
-                    Metric(title: "CPU", value: number(dictionary(model.snapshot["cpu"])["usage"]))
-                    Metric(title: "記憶體", value: number(dictionary(model.snapshot["memory"])["used_percent"]))
-                }
                 ScrollView {
                     VStack(alignment: .leading, spacing: 12) {
                         ForEach(groups.indices, id: \.self) { index in
