@@ -40,6 +40,62 @@ class TransportTests(unittest.TestCase):
         rows=[line.split('\t') for line in r.stdout.splitlines() if '\trow\t' in line]
         self.assertEqual([base64.b64decode(x[-1]).decode() for x in rows],['true','false','false'])
 
+class CleanPreviewTests(unittest.TestCase):
+    shell = TransportTests.shell
+    # Extract only the pure emitter: never source clean.sh or run a scan.
+    def preview(self, ledger, scan_rc='0', timeouts='0'):
+        source = (ROOT / 'Sources/HarbourMac/Resources/Engine/bin/clean.sh').read_text()
+        marker = 'emit_harbour_clean_preview() {\n'
+        self.assertTrue(marker in source, 'Missing read-only clean preview emitter')
+        self.assertEqual(source.count(marker), 1)
+        function = marker + source.split(marker, 1)[1].split('\n}\n', 1)[0] + '\n}\n'
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'ledger'
+            path.write_bytes(ledger)
+            return self.shell(function + '\nCLEAN_PREVIEW_LEDGER_FILE="$1"; SYSTEM_CLEAN=false; MOLE_CLEAN_SIZING_TIMEOUTS="$3"; emit_harbour_clean_preview "$2"', '', str(path), scan_rc, timeouts)
+
+    def record(self, identity='dev:inode', size='2', count='1', known='true', section='User caches', path='/fixture/cache'):
+        return b''.join(field.encode() + b'\0' for field in (identity, size, count, known, section, path))
+
+    def events(self, result):
+        return [(f[1], [base64.b64decode(x, validate=True).decode() for x in f[2:]])
+                for line in result.stdout.splitlines() if line.startswith('@@HARBOUR:')
+                for f in [line.split('\t')]]
+
+    def test_ledger_deduplicates_first_identity_and_preserves_data(self):
+        path = '/測試/a\n\t\\$(not-executed)'
+        result = self.preview(self.record(path=path) + self.record(size='999') +
+                              self.record(identity='second', size='0', known='false'))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.events(result), [
+            ('clean_preview_begin', ['1', 'mole.clean.deduplicated-ledger', 'false']),
+            ('clean_preview_item', ['0', 'dev:inode', 'User caches', path, '2', '1', 'true']),
+            ('clean_preview_item', ['1', 'second', 'User caches', '/fixture/cache', '0', '1', 'false']),
+            ('clean_preview_end', ['2', '0', '0'])])
+
+    def test_hook_is_only_installed_for_clean_preview(self):
+        bridge = (ROOT / 'Sources/HarbourMac/Resources/bridge.sh').read_text()
+        self.assertIn('if [[ "$command_name" == clean && "$mode" == preview ]]; then\n            harbour_clean_preview_hook() { emit_harbour_clean_preview "$1"; }', bridge)
+        clean = (ROOT / 'Sources/HarbourMac/Resources/Engine/bin/clean.sh').read_text()
+        self.assertIn('if declare -f harbour_clean_preview_hook > /dev/null 2>&1; then\n            harbour_clean_preview_hook "$cleanup_cancel_rc" || return 74', clean)
+
+    def test_empty_ledger_is_explicitly_complete(self):
+        self.assertEqual(self.events(self.preview(b''))[-1], ('clean_preview_end', ['0', '0', '0']))
+
+    def test_truncation_and_malformed_records_never_emit_end(self):
+        for data in [self.record()[:-1], b'id\0', b'partial', self.record(size='-1'),
+                     self.record(size='9007199254740992'), self.record(count='0'),
+                     self.record(known='yes'), self.record(identity=''),
+                     self.record() + self.record(size='$(bad)')]:
+            with self.subTest(data=data):
+                result = self.preview(data)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertNotIn('clean_preview_end', [kind for kind, _ in self.events(result)])
+
+    def test_scan_status_and_timeout_count_are_not_hidden(self):
+        self.assertEqual(self.events(self.preview(self.record(), '124', '3'))[-1],
+                         ('clean_preview_end', ['1', '124', '3']))
+
 class WorkerTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

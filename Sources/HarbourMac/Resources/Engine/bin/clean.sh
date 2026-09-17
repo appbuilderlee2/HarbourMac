@@ -364,6 +364,50 @@ emit_deduplicated_dry_run_ledger() {
     done < "$CLEAN_PREVIEW_LEDGER_FILE"
 }
 
+# Read-only GUI projection of the six-field ledger. Do not use the legacy
+# emitter here: it intentionally tolerates truncated records for CLI output.
+# No end event is emitted on malformed input; callers must fail the preview.
+emit_harbour_clean_preview() {
+    local scan_rc="$1" timeouts="${MOLE_CLEAN_SIZING_TIMEOUTS:-0}"
+    local LC_ALL=C
+    [[ -n "${CLEAN_PREVIEW_LEDGER_FILE:-}" && -f "$CLEAN_PREVIEW_LEDGER_FILE" &&
+        ! -L "$CLEAN_PREVIEW_LEDGER_FILE" && -r "$CLEAN_PREVIEW_LEDGER_FILE" ]] || return 74
+    [[ "$SYSTEM_CLEAN" == true || "$SYSTEM_CLEAN" == false ]] || return 74
+    [[ "$scan_rc" =~ ^(0|[1-9][0-9]*)$ && ${#scan_rc} -le 3 && "$scan_rc" -le 255 ]] || return 74
+    [[ "$timeouts" =~ ^(0|[1-9][0-9]*)$ && ${#timeouts} -le 18 ]] || return 74
+    harbour_event clean_preview_begin 1 mole.clean.deduplicated-ledger "$SYSTEM_CLEAN" || return 74
+    local identity size_kb count size_known section path existing duplicate row_count=0
+    local -a seen_identities=()
+    while true; do
+        identity=""
+        if ! IFS= read -r -d '' identity; then
+            [[ -z "$identity" ]] || return 74
+            break
+        fi
+        IFS= read -r -d '' size_kb &&
+            IFS= read -r -d '' count &&
+            IFS= read -r -d '' size_known &&
+            IFS= read -r -d '' section &&
+            IFS= read -r -d '' path || return 74
+        [[ -n "$identity" && -n "$section" && -n "$path" ]] || return 74
+        [[ "$size_kb" =~ ^(0|[1-9][0-9]*)$ && ${#size_kb} -le 16 ]] || return 74
+        # Int64.max / 1024; validate before any arithmetic on ledger data.
+        [[ ${#size_kb} -lt 16 || "$size_kb" < 9007199254740992 ]] || return 74
+        [[ "$count" =~ ^[1-9][0-9]*$ && ${#count} -le 19 ]] || return 74
+        [[ ${#count} -lt 19 || "$count" < 9223372036854775808 ]] || return 74
+        [[ "$size_known" == true || "$size_known" == false ]] || return 74
+        duplicate=false
+        for existing in "${seen_identities[@]+"${seen_identities[@]}"}"; do
+            if [[ "$existing" == "$identity" ]]; then duplicate=true; break; fi
+        done
+        [[ "$duplicate" == false ]] || continue
+        seen_identities+=("$identity")
+        harbour_event clean_preview_item "$row_count" "$identity" "$section" "$path" "$size_kb" "$count" "$size_known" || return 74
+        row_count=$((row_count + 1))
+    done < "$CLEAN_PREVIEW_LEDGER_FILE"
+    harbour_event clean_preview_end "$row_count" "$scan_rc" "$timeouts"
+}
+
 write_clean_preview_header() {
     cat > "$EXPORT_LIST_FILE" << EOF
 # Mole Cleanup Preview - $(date '+%Y-%m-%d %H:%M:%S')
@@ -1829,6 +1873,11 @@ perform_cleanup() {
     echo ""
 
     if [[ "$DRY_RUN" == "true" ]]; then
+        # Only the GUI clean-preview bridge installs this optional hook.
+        # Validate before the legacy renderer can normalize malformed fields.
+        if declare -f harbour_clean_preview_hook > /dev/null 2>&1; then
+            harbour_clean_preview_hook "$cleanup_cancel_rc" || return 74
+        fi
         render_clean_preview_from_ledger
     fi
 

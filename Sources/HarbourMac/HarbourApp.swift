@@ -92,10 +92,48 @@ struct DiskReport: Decodable {
     @Published var versionInfo = "內置引擎：Mole 1.53.0（固定版本）"
     @Published var busyNetwork = false
     private var previews: [String: Date] = [:]
+    @Published private(set) var cleanPreview = CleanPreviewSession()
+    @Published private(set) var cleanPreviewStarted = false
+    private var receivingCleanPreview = false
+    private var cleanPreviewKey: String?
+    private var cleanPreviewStamp: Date?
+    var previewGeneration = UUID()
+
+    func beginCleanPreview() {
+        cleanPreview = CleanPreviewSession(); cleanPreviewStarted = true
+        receivingCleanPreview = true; cleanPreviewKey = previewKey; cleanPreviewStamp = nil
+        previewGeneration = UUID()
+    }
+    func finishCleanPreview(exitCode: Int32) {
+        guard receivingCleanPreview else { return }
+        cleanPreview.finish(exitCode: exitCode); receivingCleanPreview = false
+        if cleanPreview.isSuccessful {
+            cleanPreviewStamp = Date()
+            runner.taskPhase = "預覽完成"
+        } else {
+            cleanPreviewStamp = nil
+            notice = "清理預覽不完整或格式無效；請重新掃描。"
+            runner.taskPhase = "預覽未完成"
+            runner.outcome = "清理預覽未完整完成；請重新掃描"
+        }
+    }
+    func cleanSizeText(_ item: CleanPreviewItem) -> String {
+        guard let bytes = item.bytes else { return "未知" }
+        return ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+    }
+    var cleanTotalText: String {
+        let size = ByteCountFormatter.string(fromByteCount: cleanPreview.knownBytes, countStyle: .file)
+        if !cleanPreview.isSuccessful { return "已接收 \(cleanPreview.items.count) 項；完整大小尚未確認" }
+        return cleanPreview.unknownSizeCount == 0 ? "估計可清理：\(size)" : "已知大小：\(size)；\(cleanPreview.unknownSizeCount) 項大小未知"
+    }
 
     init() {
         cancellable = runner.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
         runner.onEvent = { [weak self] event in self?.handle(event) }
+        runner.onInvalidPreview = { [weak self] in
+            guard let self = self, self.receivingCleanPreview else { return }
+            self.cleanPreview.invalidate()
+        }
     }
     var previewKey: String { (page?.command ?? "") + "|" + externalPath + "|" + String(admin) }
     var isSelectionOperation: Bool {
@@ -122,7 +160,7 @@ struct DiskReport: Decodable {
         case .uninstall: return "先掃描，完成後勾選你確定不要的 App；下一步會先顯示相關檔案，最後才會要求確認。"
         case .purge: return "只會列出可重新產生的開發檔案。近期使用或雲端同步項目預設保留。"
         case .installer: return "找出下載資料夾內的安裝檔。勾選後會永久刪除選取的檔案。"
-        case .clean: return "先按「預覽清理」了解會處理什麼；預覽不會刪除資料。"
+        case .clean: return "先按「預覽清理」了解會處理什麼。預覽不會刪除資料，但會寫入預覽檔、暫存紀錄，啟用操作日誌時亦會記錄；執行時引擎會重新掃描。"
         case .optimize: return "先檢查系統維護項目，再由你決定是否執行。"
         case .external: return "先選擇外置磁碟，再預覽 Mole 支援的暫存資料。"
         default: return ""
@@ -138,7 +176,7 @@ struct DiskReport: Decodable {
             }
             return "目前只是在掃描，尚未刪除任何 App 或檔案。"
         }
-        if !runner.taskTitle.hasPrefix("執行") && (runner.taskTitle.contains("預覽") || runner.taskTitle.contains("分析") || runner.taskTitle.contains("檢查")) { return "這一步只讀取及分析資料，不會刪除檔案。" }
+        if !runner.taskTitle.hasPrefix("執行") && (runner.taskTitle.contains("預覽") || runner.taskTitle.contains("分析") || runner.taskTitle.contains("檢查")) { return "這一步不會刪除檔案；但預覽及分析可能寫入預覽檔、暫存或日誌紀錄。" }
         if let currentPage = page, [.status, .disk, .history].contains(currentPage) { return "這一步只讀取資料，不會修改或刪除檔案。" }
         return "操作進行中；完成前請不要重覆按其他操作。你可以按「停止」取消。"
     }
@@ -172,18 +210,23 @@ struct DiskReport: Decodable {
             return "你已選擇 \(selected.count) 項。確認後 Harbour 才會開始處理；你仍可返回修改清單。"
         }
         switch page {
-        case .clean: return "確認後會按預覽結果清理快取、日誌及暫存資料；部分內容可能永久刪除。"
+        case .clean: return "確認後引擎會重新掃描，按執行當下狀態清理；範圍不會鎖定在這份清單，部分內容可能永久刪除。"
         case .optimize: return "確認後會執行已檢查的系統維護項目，可能重新整理 Finder、DNS 或系統服務。"
         case .external: return "確認後只會處理你選擇的外置磁碟上的支援項目。"
         default: return "請確認你明白這項操作可能改變本機資料。"
         }
     }
     var canApply: Bool {
+        if page == .clean {
+            guard cleanPreview.isSuccessful, cleanPreviewKey == previewKey, let stamp = cleanPreviewStamp else { return false }
+            return Date().timeIntervalSince(stamp) < 600
+        }
         if let page = page, [Page.uninstall, .purge, .installer].contains(page) { return true }
         guard let stamp = previews[previewKey] else { return false }
         return Date().timeIntervalSince(stamp) < 600
     }
     var previewStatus: String? {
+        if page == .clean { return canApply ? "預覽已完成；執行時會重新掃描，不會鎖定此清單" : nil }
         guard !isSelectionOperation, let stamp = previews[previewKey] else { return nil }
         let remaining = max(0, 600 - Int(Date().timeIntervalSince(stamp)))
         return remaining > 0 ? "預覽已完成；你可在 \(max(1, remaining / 60)) 分鐘內執行" : nil
@@ -203,6 +246,12 @@ struct DiskReport: Decodable {
         rows = []; selected = []; selecting = false; selectionSubmitted = false; confirm = nil; query = ""; notice = ""; runner.onLine = nil
     }
     func handle(_ event: BridgeEvent) {
+        if event.kind.hasPrefix("clean_preview_") {
+            guard receivingCleanPreview else { return }
+            cleanPreview.consume(event)
+            runner.taskPhase = "正在整理清理預覽：\(cleanPreview.items.count) 項"
+            return
+        }
         switch event.kind {
         case "begin":
             rows = []; selected = []; selectionTitle = event.fields[0]; selectionNote = event.fields[1]
@@ -230,6 +279,12 @@ struct DiskReport: Decodable {
     func bridge(_ command: String, apply: Bool, args: [String] = [], title: String? = nil, phase: String? = nil, completion: ((Data, Int32) -> Void)? = nil) {
         guard !runner.busy else { return }
         resetSession()
+        receivingCleanPreview = false
+        let isCleanPreview = command == "clean" && !apply
+        if command == "clean" {
+            if isCleanPreview { beginCleanPreview() }
+            else { cleanPreviewStamp = nil }
+        }
         runner.taskTitle = title ?? (apply && !isSelectionOperation ? "執行\(actionTitle)" : actionTitle)
         runner.taskPhase = phase ?? (apply && !isSelectionOperation ? "正在準備執行…" : "正在掃描，請稍候…")
         runner.start(URL(fileURLWithPath: "/bin/bash"), [runner.resourceURL.appendingPathComponent("bridge.sh").path, command, apply ? "apply" : "preview"] + args, environment: ["HARBOUR_ADMIN": admin ? "1" : "0"]) { [weak self] data, rc in
@@ -237,6 +292,7 @@ struct DiskReport: Decodable {
             if rc == 0 { self?.runner.taskPhase = apply ? "完成" : "預覽完成" }
             else if rc == 130 { self?.runner.taskPhase = "已取消" }
             else { self?.runner.taskPhase = "需要查看詳細結果" }
+            if isCleanPreview { self?.finishCleanPreview(exitCode: rc) }
             completion?(data, rc)
         }
     }
@@ -247,7 +303,7 @@ struct DiskReport: Decodable {
         let key = previewKey
         previews[key] = nil
         bridge(page.command, apply: apply, args: page == .external ? [externalPath] : []) { [weak self] _, rc in
-            if !apply && rc == 0 { self?.previews[key] = Date() }
+            if page != .clean && !apply && rc == 0 { self?.previews[key] = Date() }
         }
     }
     func chooseFolder(external: Bool = false) {
@@ -309,12 +365,39 @@ struct DiskReport: Decodable {
         configLoaded = false
         bridge(configKind == "purgepaths" ? "purgepaths" : "whitelist", apply: false, args: configKind == "purgepaths" ? [] : [configKind], title: "載入保護設定", phase: "正在讀取本機設定…")
     }
-    func saveConfig() {
+    /// Handles the saveConfig completion: any genuine save attempt invalidates
+    /// previews (fail closed on rc!=0 too — a partial write must never leave an
+    /// older preview eligible), while the refreshed generation token ensures
+    /// late preview callbacks cannot re-stamp an already-expired config view.
+    func handleSaveConfigResult(_ rc: Int32) {
         guard configLoaded else { return }
+        previews = [:]
+        cleanPreview.invalidate()
+        cleanPreviewStamp = nil
+        notice = rc == 0 ? "已儲存；之前的清理預覽已失效，請重新掃描。"
+                         : "儲存未成功確認；之前的清理預覽已失效，請重新掃描。"
+        previewGeneration = UUID()
+    }
+    /// Completion side of saveConfig: results from an older generation (a newer
+    /// preview or save has started) are discarded before touching any state.
+    func handleSaveCompletion(capturedGeneration: UUID, rc: Int32) {
+        guard configLoaded, capturedGeneration == previewGeneration else { return }
+        handleSaveConfigResult(rc)
+    }
+    func saveConfig() {
+        guard configLoaded, !runner.busy else { return }
+        // The whitelist being written may differ from what any current preview
+        // scanned, and a failed write leaves the outcome uncertain: expire
+        // preview eligibility the moment the save is attempted (fail closed).
+        previews = [:]
+        cleanPreview.invalidate()
+        cleanPreviewStamp = nil
+        previewGeneration = UUID()
+        let generation = previewGeneration
         let lines = configText.components(separatedBy: .newlines).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty && !$0.hasPrefix("#") }
         let prefix = configKind == "purgepaths" ? [] : [configKind]
         bridge(configKind == "purgepaths" ? "purgepaths" : "whitelist", apply: true, args: prefix + lines, title: "儲存保護設定", phase: "正在寫入本機設定…") { [weak self] _, rc in
-            if rc == 0 { self?.previews = [:]; self?.notice = "已儲存；之前的清理預覽已失效。" }
+            self?.handleSaveCompletion(capturedGeneration: generation, rc: rc)
         }
     }
     func addConfigPath() {
@@ -449,11 +532,39 @@ struct ContentView: View {
                     Text("掃描完成後再選擇項目").font(.caption).foregroundColor(.secondary)
                 } else {
                     Button("預覽（不刪除）") { model.operate(false) }.disabled(model.runner.busy)
-                    Button("執行預覽內容") { model.operate(true) }.keyboardShortcut(.defaultAction).disabled(model.runner.busy || !model.canApply)
+                    Button(model.page == .clean ? "重新掃描並清理…" : "執行預覽內容") { model.operate(true) }.keyboardShortcut(.defaultAction).disabled(model.runner.busy || !model.canApply)
                     if let status = model.previewStatus { Text(status).font(.caption).foregroundColor(.secondary) }
                 }
             }
             if !model.isSelectionOperation && !model.canApply { Text("先完成預覽，執行按鈕才會啟用。").font(.caption).foregroundColor(.secondary) }
+            if model.page == .clean && model.cleanPreviewStarted { cleanPreviewView }
+        }
+    }
+    private var cleanPreviewView: some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(model.cleanPreview.isSuccessful ? "清理預覽（唯讀）" : "清理預覽（未完整驗證）").font(.headline)
+                Text(model.cleanTotalText)
+                Text(model.cleanPreview.systemIncluded ? "本次掃描包含系統項目" : "本次掃描不包含系統項目").font(.caption).foregroundColor(.secondary)
+                Text("執行時會重新掃描及驗證；這不是已鎖定的刪除清單，亦不提供逐項勾選。").font(.caption).foregroundColor(.secondary)
+                if model.cleanPreview.sizingTimeoutCount > 0 {
+                    Text("大小檢查逾時：\(model.cleanPreview.sizingTimeoutCount) 次；估算可能不完整。").font(.caption).foregroundColor(.orange)
+                }
+                if model.cleanPreview.isSuccessful && model.cleanPreview.items.isEmpty { Text("本次掃描沒有可列出的清理項目。") }
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 10) {
+                        ForEach(model.cleanPreview.categories, id: \.self) { category in
+                            Text(category).font(.headline)
+                            ForEach(model.cleanPreview.items.filter { $0.category == category }) { item in
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(item.path).font(.caption).textSelection(.enabled)
+                                    Text("\(model.cleanSizeText(item)) · \(item.itemCount) 項").font(.caption).foregroundColor(.secondary)
+                                }
+                            }
+                        }
+                    }.frame(maxWidth: .infinity, alignment: .leading)
+                }.frame(maxHeight: 300)
+            }.padding(8)
         }
     }
     private var selectionView: some View {

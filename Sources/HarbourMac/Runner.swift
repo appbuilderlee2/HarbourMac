@@ -12,6 +12,7 @@ final class StreamCapture: @unchecked Sendable {
         if data.count > room { overflow = true }
         buffer.append(data.prefix(room))
     }
+    func markOverflow() { lock.lock(); defer { lock.unlock() }; overflow = true }
     func result() -> (Data, Bool) { lock.lock(); defer { lock.unlock() }; return (buffer, overflow) }
 }
 
@@ -25,12 +26,19 @@ final class StreamCapture: @unchecked Sendable {
     @Published var elapsedSeconds = 0
     var onEvent: ((BridgeEvent) -> Void)?
     var onLine: ((String) -> Void)?
+    var onInvalidPreview: (() -> Void)?
     private var process: Process?
     private var input: FileHandle?
     private var timer: Timer?
     private var progressTimer: Timer?
     private var stopped = false
-    private var runID = UUID()
+    private(set) var runID = UUID()
+
+    // All queued output/timer callbacks must pass this gate, including tails.
+    func receive(for id: UUID, _ action: (Runner) -> Void) {
+        guard runID == id, busy else { return }
+        action(self)
+    }
     var resourceURL: URL { Bundle.module.resourceURL!.appendingPathComponent("Resources") }
     var engineURL: URL { resourceURL.appendingPathComponent("Engine") }
     var workerURL: URL { Bundle.main.executableURL!.deletingLastPathComponent().appendingPathComponent("HarbourWorker") }
@@ -55,14 +63,14 @@ final class StreamCapture: @unchecked Sendable {
     }
     func start(_ executable: URL, _ arguments: [String], environment extras: [String: String] = [:], timeout: TimeInterval = 1800, completion: ((Data, Int32) -> Void)? = nil) {
         guard !busy else { return }
+        runID = UUID()
+        let id = runID
         guard FileManager.default.isExecutableFile(atPath: workerURL.path) else { outcome = "缺少 HarbourWorker；請用 build.command 完整打包 App。"; completion?(Data(), 127); return }
         busy = true; stopped = false; log = ""; outcome = "執行中"; startedAt = Date(); elapsedSeconds = 0; taskPhase = "正在準備…"
         progressTimer?.invalidate()
         progressTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-            guard let self = self, self.busy else { return }
-            self.elapsedSeconds += 1
+            self?.receive(for: id) { $0.elapsedSeconds += 1 }
         }
-        runID = UUID()
         let token = UUID().uuidString
         let process = Process(), stdout = Pipe(), stderr = Pipe(), stdinPipe = Pipe()
         process.executableURL = workerURL
@@ -88,19 +96,24 @@ final class StreamCapture: @unchecked Sendable {
                         let line = String(decoding: pending.prefix(upTo: index), as: UTF8.self)
                         pending.removeSubrange(...index)
                         DispatchQueue.main.async { [weak self] in
-                            guard let self = self else { return }
-                            if isOutput, let event = BridgeEvent.parse(line, token: token) { self.onEvent?(event) }
-                            else {
-                                if isOutput { self.onLine?(line) }
-                                self.appendLog(TextFormat.plain(line) + "\n")
+                            self?.receive(for: id) { runner in
+                                if isOutput, let event = BridgeEvent.parse(line, token: token) { runner.onEvent?(event) }
+                                else {
+                                    if isOutput, BridgeEvent.isCleanPreviewFrame(line, token: token) { runner.onInvalidPreview?() }
+                                    if isOutput { runner.onLine?(line) }
+                                    runner.appendLog(TextFormat.plain(line) + "\n")
+                                }
                             }
                         }
                     }
-                    if pending.count > 2_000_000 { pending.removeAll() }
+                    if pending.count > 2_000_000 { capture.markOverflow(); pending.removeAll() }
                 }
                 if !pending.isEmpty {
                     let tail = String(decoding: pending, as: UTF8.self)
-                    DispatchQueue.main.async { [weak self] in self?.appendLog(TextFormat.plain(tail)) }
+                    if isOutput, BridgeEvent.isCleanPreviewFrame(tail, token: token) { capture.markOverflow() }
+                    DispatchQueue.main.async { [weak self] in
+                        self?.receive(for: id) { $0.appendLog(TextFormat.plain(tail)) }
+                    }
                 }
             }
         }
@@ -108,7 +121,7 @@ final class StreamCapture: @unchecked Sendable {
             let drainOK = drains.wait(timeout: .now() + 5) == .success
             let result = capture.result()
             DispatchQueue.main.async {
-                guard let self = self else { return }
+                guard let self = self, self.runID == id, self.busy else { return }
                 self.timer?.invalidate(); self.timer = nil; self.progressTimer?.invalidate(); self.progressTimer = nil
                 try? self.input?.close(); self.input = nil; self.process = nil; self.busy = false
                 self.startedAt = nil
@@ -124,7 +137,7 @@ final class StreamCapture: @unchecked Sendable {
             self.process = process; input = stdinPipe.fileHandleForWriting
             if timeout > 0 {
                 timer = Timer.scheduledTimer(withTimeInterval: timeout, repeats: false) { [weak self] _ in
-                    Task { @MainActor in self?.stop() }
+                    Task { @MainActor in self?.receive(for: id) { $0.stop() } }
                 }
             }
         } catch {
