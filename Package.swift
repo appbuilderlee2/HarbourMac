@@ -9,5 +9,6 @@ var targets: [Target] = [
 #if os(macOS)
 products.append(.executable(name: "HarbourMac", targets: ["HarbourMac"]))
 targets.append(.executableTarget(name: "HarbourMac", dependencies: ["HarbourCore"], resources: [.copy("Resources")]))
+targets.append(.testTarget(name: "HarbourMacTests", dependencies: ["HarbourMac"], path: "Tests/HarbourMacTests"))
 #endif
 let package = Package(name: "HarbourMac", platforms: [.macOS(.v12)], products: products, targets: targets)
