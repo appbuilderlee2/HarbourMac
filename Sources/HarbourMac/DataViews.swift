@@ -144,36 +144,105 @@ struct DiskView: View {
     }
 }
 
+import HarbourCore
+
 struct HistoryView: View {
     @ObservedObject var model: AppModel
     @State private var query = ""
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack { Button("載入操作紀錄", action: model.loadHistory).disabled(model.runner.busy); TextField("搜尋紀錄", text: $query) }
+            if model.history.isEmpty {
+                Text("尚未載入紀錄。載入只會讀取本機日誌。").foregroundColor(.secondary)
+            } else {
+                summaryStrip(HistorySummary(model.history))
+            }
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("最近操作").font(.headline)
-                    records(model.history["sessions"], titleKey: "command", dateKey: "started_at")
+                    records(model.history["sessions"], isSession: true)
                     Divider(); Text("檔案紀錄").font(.headline)
-                    records(model.history["deletions"], titleKey: "path", dateKey: "timestamp")
+                    records(model.history["deletions"], isSession: false)
                 }
             }.frame(minHeight: 280)
         }
     }
-    private func records(_ value: Any?, titleKey: String, dateKey: String) -> some View {
-        let rows = (value as? [[String: Any]] ?? []).filter { query.isEmpty || String(describing: $0).localizedCaseInsensitiveContains(query) }
+
+    private func summaryStrip(_ summary: HistorySummary) -> some View {
+        GroupBox("目前載入紀錄") {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .top, spacing: 24) {
+                    VStack(alignment: .leading) {
+                        Text("操作時段：\(summary.sessions.count)").font(.headline)
+                        Text("清理 \(summary.cleanSessionCount) · 系統維護 \(summary.optimizeSessionCount)")
+                    }
+                    VStack(alignment: .leading) {
+                        Text("檔案稽核：\(summary.deletions.count)").font(.headline)
+                        Text("永久刪除回報 ok：\(summary.count(.permanentOK)) · 移到垃圾桶回報 ok：\(summary.count(.trashOK))")
+                        Text("預覽 \(summary.count(.preview)) · 略過／拒絕 \(summary.count(.skipped)) · 失敗／中斷 \(summary.count(.failed)) · 未知 \(summary.count(.unknown))")
+                    }
+                }.font(.caption)
+                Text("永久刪除 ok 紀錄的已知大小加總：\(summary.knownPermanentBytes.map { bytes($0) } ?? "超出可計算範圍")；大小未知 \(summary.unknownPermanentSizeCount) 筆。")
+                    .font(.caption)
+                Text("大小為操作前量度，不代表實際釋放空間；紀錄可能重疊。未加上時段大小、垃圾桶、預覽或失敗紀錄。")
+                    .font(.caption).foregroundColor(.secondary)
+                Text("摘要不隨搜尋改變。只涵蓋目前載入、仍保留的日誌；舊日誌可能已輪替，並非完整歷史。日期依原始紀錄顯示；操作時段沒有時區。")
+                    .font(.caption).foregroundColor(.secondary)
+                Text("零筆不代表你從未操作，只代表目前沒有載入可辨識的紀錄；日誌也可能不存在。")
+                    .font(.caption).foregroundColor(.secondary)
+                if let limit = summary.limit {
+                    Text("引擎每類最多載入 \(limit) 筆。" + (summary.sessionLimitReached || summary.deletionLimitReached ? "已達載入上限，可能還有較舊紀錄。" : "未達上限亦不代表日誌完整。"))
+                        .font(.caption).foregroundColor(.secondary)
+                } else {
+                    Text("未提供有效載入上限，無法判斷是否截斷。").font(.caption).foregroundColor(.secondary)
+                }
+                if summary.hasInvalidCollections || summary.invalidRowCount > 0 {
+                    Text("部分紀錄缺漏或格式無效；摘要只計算可辨識的紀錄。").font(.caption).foregroundColor(.orange)
+                }
+                Text("前往功能只會切換頁面，不會重播紀錄或開始清理；請重新查看目前狀態。")
+                    .font(.caption).foregroundColor(.secondary)
+            }.fixedSize(horizontal: false, vertical: true).padding(6).frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func records(_ value: Any?, isSession: Bool) -> some View {
+        let rows = (value as? [Any] ?? []).compactMap { $0 as? [String: Any] }
+            .filter { query.isEmpty || String(describing: $0).localizedCaseInsensitiveContains(query) }
         return VStack(alignment: .leading, spacing: 8) {
             if rows.isEmpty { Text("沒有符合的紀錄").foregroundColor(.secondary) }
             ForEach(rows.indices, id: \.self) { index in
                 let row = rows[index]
                 GroupBox {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text(display(row[titleKey])).font(.headline).textSelection(.enabled)
-                        Text(display(row[dateKey]) + " · " + display(row["status"] ?? row["size"])).font(.caption).foregroundColor(.secondary)
+                        if isSession {
+                            sessionHeader(HistorySession(row))
+                        } else {
+                            Text(display(row["path"])).font(.headline).textSelection(.enabled)
+                            Text(display(row["timestamp"]) + " · " + display(row["status"])).font(.caption).foregroundColor(.secondary)
+                        }
                         DisclosureGroup("操作詳情") { JSONInspector(value: row) }
                     }.padding(6).frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
         }
     }
+
+    private func sessionHeader(_ session: HistorySession) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(session.command ?? "未提供指令").font(.headline).textSelection(.enabled)
+            Text((session.startedAt ?? "未提供開始時間") + " · 結束：" + (session.endedAt ?? "未記錄（不代表仍在執行）"))
+                .font(.caption).foregroundColor(.secondary)
+            Text("移除 \(countText(session.actions.removed)) · 垃圾桶 \(countText(session.actions.trashed)) · 略過 \(countText(session.actions.skipped)) · 失敗 \(countText(session.actions.failed)) · 維護任務失敗 \(countText(session.failedTasks))")
+                .font(.caption).foregroundColor(.secondary)
+            Text("時段回報大小：\(session.reportedSize ?? "未知")（不加入檔案大小加總）")
+                .font(.caption).foregroundColor(.secondary)
+            if session.command == "clean" {
+                Button("前往清理") { model.navigate(to: Page.clean) }.disabled(!model.canNavigate)
+            } else if session.command == "optimize" {
+                Button("前往系統維護") { model.navigate(to: Page.optimize) }.disabled(!model.canNavigate)
+            }
+        }
+    }
+
+    private func countText(_ value: Int64?) -> String { value.map { String($0) } ?? "未知" }
 }
