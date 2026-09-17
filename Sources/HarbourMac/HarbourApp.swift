@@ -75,6 +75,8 @@ struct DiskReport: Decodable {
     @Published var query = ""
     @Published var notice = ""
     @Published var snapshot: [String: Any] = [:]
+    @Published private(set) var statusHistory = StatusHistory()
+    @Published private(set) var statusReadFailed = false
     @Published var history: [String: Any] = [:]
     @Published var disk: DiskReport?
     @Published var folder = FileManager.default.homeDirectoryForCurrentUser.path
@@ -335,22 +337,38 @@ struct DiskReport: Decodable {
             self?.disk = nil; self?.diskSelection = []; self?.notice = "磁碟內容可能已改變，請重新分析。"
         }
     }
-    func loadStatus(live: Bool) {
+    // The optional starter is a fixture-only seam; production uses the existing Runner.
+    func loadStatus(live: Bool, now: @escaping () -> Date = Date.init,
+                    start: ((@escaping (Data, Int32) -> Void) -> Void)? = nil) {
         guard !runner.busy else { return }
         resetSession(); watch = live
-        runner.taskTitle = live ? "持續監察系統" : "讀取系統狀態"; runner.taskPhase = live ? "每 2 秒更新一次；按停止結束監察" : "正在讀取 CPU、記憶體及硬件資料…"
+        snapshot = [:]; statusHistory = StatusHistory(); statusReadFailed = false
+        runner.taskTitle = live ? "持續監察系統" : "讀取系統狀態"; runner.taskPhase = live ? "約每 2 秒採樣；按停止結束監察" : "正在讀取 CPU、記憶體及硬件資料…"
+        let ingest: (Data) -> Void = { [weak self] data in
+            guard let self = self else { return }
+            guard let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  self.statusHistory.ingest(value, now: now()) else {
+                self.statusReadFailed = true
+                self.notice = "未能接收有效系統狀態；時間缺漏、過舊、未來、重複或倒序的快照不會更新趨勢。"
+                return
+            }
+            self.snapshot = value; self.statusReadFailed = false; self.notice = ""
+        }
         if live {
             runner.onLine = { [weak self] line in
-                guard let data = line.data(using: .utf8), let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
-                self?.snapshot = value
+                guard self?.watch == true else { return }
+                ingest(Data(line.utf8))
             }
         }
-        runner.start(runner.engineURL.appendingPathComponent("bin/status-go"), live ? ["--watch", "--interval", "2s"] : ["--json"], timeout: live ? 0 : 120) { [weak self] data, rc in
+        let completion: (Data, Int32) -> Void = { [weak self] data, rc in
             guard let self = self else { return }
             self.watch = false; self.runner.onLine = nil
-            guard !live, rc == 0 else { return }
-            if let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any] { self.snapshot = value }
-            else { self.notice = "未能解析系統狀態。" }
+            if rc != 0 { self.statusReadFailed = rc != 130; return }
+            if !live { ingest(data) }
+        }
+        if let start = start { start(completion) }
+        else {
+            runner.start(runner.engineURL.appendingPathComponent("bin/status-go"), live ? ["--watch", "--interval", "2s"] : ["--json"], timeout: live ? 0 : 120, completion: completion)
         }
     }
     func loadHistory() {
