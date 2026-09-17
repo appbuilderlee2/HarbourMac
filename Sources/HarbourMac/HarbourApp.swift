@@ -49,7 +49,22 @@ struct DiskReport: Decodable {
 @MainActor final class AppModel: ObservableObject {
     let runner = Runner()
     private var cancellable: AnyCancellable?
-    @Published var page: Page? = .status
+    @Published private(set) var page: Page? = .status
+    private var lastPages: [ObservatorySection: Page] = [:]
+    var canNavigate: Bool { !runner.busy && !selecting && confirm == nil }
+
+    func navigate(to destination: Page) {
+        guard canNavigate else { return }
+        if let section = ObservatorySection.containing(destination) {
+            lastPages[section] = destination
+        }
+        page = destination
+    }
+
+    func navigate(to section: ObservatorySection) {
+        guard let destination = lastPages[section] ?? section.pages.first else { return }
+        navigate(to: destination)
+    }
     @Published var rows: [Candidate] = []
     @Published var selected: Set<Int> = []
     @Published var selecting = false

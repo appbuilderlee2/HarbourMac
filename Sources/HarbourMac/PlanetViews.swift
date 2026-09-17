@@ -71,7 +71,7 @@ struct SolarOverview: View {
             Text("星體各循其軌，Harbour 照看 Mac 的日常").font(.headline)
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 155), spacing: 12)], spacing: 12) {
                 ForEach(pages) { page in
-                    Button { model.page = page } label: {
+                    Button { model.navigate(to: page) } label: {
                         VStack(spacing: 8) {
                             PlanetOrb(page: page, size: 46)
                             Text(page.planetName).font(.caption).foregroundColor(.secondary)
@@ -79,7 +79,7 @@ struct SolarOverview: View {
                         }.frame(maxWidth: .infinity).padding(16)
                             .background(RoundedRectangle(cornerRadius: 18).fill(page.planetColor.opacity(0.08)))
                             .overlay(RoundedRectangle(cornerRadius: 18).stroke(page.planetColor.opacity(0.18)))
-                    }.buttonStyle(.plain).help("開啟\(page.rawValue)").disabled(model.runner.busy)
+                    }.buttonStyle(.plain).help("開啟\(page.rawValue)").disabled(!model.canNavigate)
                 }
             }
         }
