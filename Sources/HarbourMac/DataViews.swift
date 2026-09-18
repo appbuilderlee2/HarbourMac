@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import HarbourCore
 
 func bytes(_ value: Int64) -> String { ByteCountFormatter.string(fromByteCount: value, countStyle: .file) }
 func dictionary(_ value: Any?) -> [String: Any] { value as? [String: Any] ?? [:] }
@@ -105,6 +106,7 @@ struct DiskView: View {
                             .font(.caption).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
                     }.padding(8).frame(maxWidth: .infinity, alignment: .leading)
                 }
+                DiskTreemapView(model: model, report: report)
                 List(model.diskRows, selection: $model.diskSelection) { entry in
                     HStack {
                         Image(systemName: entry.is_dir == true ? "folder" : "doc")
