@@ -700,6 +700,8 @@ struct ContentView: View {
                 }.disabled(model.runner.busy)
             }.frame(minHeight: 360)
         }
+    }
+}
 
 struct TaskProgressCard: View {
     @ObservedObject var model: AppModel
