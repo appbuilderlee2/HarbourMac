@@ -69,7 +69,9 @@ final class StreamCapture: @unchecked Sendable {
         busy = true; stopped = false; log = ""; outcome = "執行中"; startedAt = Date(); elapsedSeconds = 0; taskPhase = "正在準備…"
         progressTimer?.invalidate()
         progressTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-            self?.receive(for: id) { $0.elapsedSeconds += 1 }
+            Task { @MainActor [weak self] in
+                self?.receive(for: id) { $0.elapsedSeconds += 1 }
+            }
         }
         let token = UUID().uuidString
         let process = Process(), stdout = Pipe(), stderr = Pipe(), stdinPipe = Pipe()
