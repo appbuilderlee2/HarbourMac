@@ -669,7 +669,7 @@ struct ContentView: View {
         }
     }
     private var settingsView: some View {
-            ScrollView {
+        ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     HUDSettings(controller: model.hud)
                     Picker("外觀", selection: $appearance) { Text("跟隨系統").tag("system"); Text("淺色").tag("light"); Text("深色").tag("dark") }
